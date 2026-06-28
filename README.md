@@ -40,8 +40,34 @@ Google Apps Script（GAS）製の Web アプリです。
 
 ### 正規化パイプライン
 
-取得したGeoJSON群から「地域コード → ファイル」の対応表（`region-index.json`）を作るための
-スクリプトを同梱しています。
+取得したGeoJSON群から「地域コード → GeoJSONファイル」の対応表（`region-index.json`）を生成します。
+`Code.js` はこのファイルをDriveから読み、地域コードからGeoJSONファイルIDを引いています。
+
+#### 推奨：GASで完結（`admin_buildRegionIndex`）
+
+`AREA_GEO_PARENT_ID` 配下のGeoJSONをDrive上で走査して `region-index.json` を生成し、
+同じフォルダへ書き戻す管理関数を [Code.js](Code.js) に用意しています。Apps Scriptエディタで
+`admin_buildRegionIndex` を実行するだけで再生成でき、ローカル処理は不要です（実行は所有者のみ）。
+
+```js
+admin_buildRegionIndex();
+// => { ok: true, files: 188, features: 2602, rawCount: 2210, norm6Count: 2123 }
+```
+
+- Driveのファイル列挙からファイルIDが自動で得られるため、ローカル処理にあった
+  「パス → Drive ファイルID」の変換手順が不要です。
+- 生成後はサーバーキャッシュ（`region-index.json` のキャッシュ）も自動で破棄します。
+- 出力構造（`loadRegionIndex_` / `findIndexEntryForCode_` が読む形）:
+  - `raw`: 原コード（7桁等）→ `{ i: ファイルID, … }`
+  - `norm6`: 6桁正規化コード → `{ i: ファイルID, r: 代表コード, … }`
+
+なお `region-index.json` は多数のDrive ファイルIDを含むため、リポジトリには含めていません
+（`.gitignore` 対象）。実行時はDriveから読み込み、再生成も上記のGAS関数でDrive上に対して行います。
+
+#### 参考：ローカル（Python）
+
+Drive権限が無い環境向けに、ローカルのGeoJSONを集計する補助スクリプトも同梱しています
+（ファイルパスベースの対応表のみを出力し、Drive ファイルIDは付与しません）。
 
 1. [build_regioncode_index.py](build_regioncode_index.py)
    `1saibun/` `hukenyohoukutou/` `sikutyousonnwomatometatiikitou/` `sityousontou/` 配下の
@@ -49,10 +75,6 @@ Google Apps Script（GAS）製の Web アプリです。
    `taiouhyou/index_regioncode.json` / `.csv` を出力します。
 2. [analyze_region_index.py](analyze_region_index.py)
    上記の集計結果を検証・分析するための補助スクリプトです。
-
-出力された対応表をもとに、Google Drive上のフォルダ構成と紐づけた最終形が
-`region-index.json`（リポジトリに含む・約670KB）です。`Code.js` はこのファイルをDriveから読み、
-地域コードからGeoJSONファイルIDを引いています。
 
 ### POI（任意地点）データ
 
@@ -93,6 +115,9 @@ node local/server.js
 `CacheService` / `PropertiesService` をローカルファイル（`region-index.json` や `points.csv` など）で
 再現し、[local/server.js](local/server.js) がポート8787でHTTPサーバーとして起動します。
 POIデータはリポジトリ内の [points.csv](points.csv) をスプレッドシート代わりに使用します。
+
+※ `region-index.json` はリポジトリに含まれないため、ローカルモックで使う場合はルート直下に別途配置してください
+（GASの `admin_buildRegionIndex` で生成したものをDriveからダウンロードする等）。
 
 ## デプロイ
 
