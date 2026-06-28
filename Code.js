@@ -104,6 +104,127 @@ function admin_getConfig() {
   return getConfig_();
 }
 
+/**
+ * 正規化パイプラインのGAS版：region-index.json を Drive 上のGeoJSONから再生成する。
+ * AREA_GEO_PARENT_ID 直下＋サブフォルダ（1saibun / hukenyohoukutou /
+ * sikutyousonnwomatometatiikitou / sityousontou など）の *.geojson / *.json を走査し、
+ * 各フィーチャの regioncode/code から raw（原コード）・norm6（6桁正規化）表を構築。
+ * Drive列挙でファイルIDが自動取得できるため、Python版にあった path→ID 変換の欠落が起きない。
+ *
+ * 出力は loadRegionIndex_ / findIndexEntryForCode_ が読む構造に一致：
+ *   { version, updatedAt, parentId, folders:{id:name}, raw:{code:{f,i,n,l}}, norm6:{6桁:{f,i,n,l,r,t}} }
+ * 生成後は region-index.json を親フォルダへ書き戻し、キャッシュを破棄する。
+ *
+ * ※ 188ファイル程度なら単発実行で収まる想定。巨大データで6分制限に当たる場合は
+ *   サブフォルダ単位で分割実行する版へ拡張する（admin_buildRegionIndexForFolder_ 等）。
+ *
+ * @returns {{ok:boolean, files:number, features:number, rawCount:number, norm6Count:number}}
+ */
+function admin_buildRegionIndex() {
+  assertOwner_();
+  const cfg = getConfig_();
+  if (!cfg.AREA_GEO_PARENT_ID) {
+    throw new Error('AREA_GEO_PARENT_ID が未設定です。admin_setAreaGeoFolderId(folderId) で設定してください。');
+  }
+  const parent = DriveApp.getFolderById(cfg.AREA_GEO_PARENT_ID);
+
+  const folders = {};   // subfolderId -> subfolderName
+  const raw = {};       // 原コード -> {f,i,n,l}
+  const norm6 = {};     // 6桁 -> {f,i,n,l,r,t}
+  const stats = { files: 0, features: 0 };
+
+  scanFolderForIndex_(parent, folders, raw, norm6, stats, cfg.INDEX_FILE_NAME);
+  const subs = parent.getFolders();
+  while (subs.hasNext()) {
+    scanFolderForIndex_(subs.next(), folders, raw, norm6, stats, cfg.INDEX_FILE_NAME);
+  }
+
+  const index = {
+    version: '2',
+    updatedAt: new Date().toISOString(),
+    parentId: cfg.AREA_GEO_PARENT_ID,
+    folders: folders,
+    raw: raw,
+    norm6: norm6
+  };
+
+  writeIndexToDrive_(parent, cfg.INDEX_FILE_NAME, JSON.stringify(index));
+  CacheService.getScriptCache().remove('REGION_INDEX_JSON_V2');
+
+  return {
+    ok: true,
+    files: stats.files,
+    features: stats.features,
+    rawCount: Object.keys(raw).length,
+    norm6Count: Object.keys(norm6).length
+  };
+}
+
+/** 1フォルダ直下の *.geojson / *.json を走査して raw / norm6 を埋める（先勝ち） */
+function scanFolderForIndex_(folder, folders, raw, norm6, stats, indexFileName) {
+  const folderId = folder.getId();
+  const folderName = folder.getName();
+  folders[folderId] = folderName;
+
+  const files = folder.getFiles();
+  while (files.hasNext()) {
+    const file = files.next();
+    const name = file.getName();
+    if (!/\.(geo)?json$/i.test(name)) continue;
+    if (name === indexFileName) continue; // 出力先（index自身）は対象外
+
+    let geo;
+    try {
+      geo = JSON.parse(file.getBlob().getDataAsString('UTF-8'));
+    } catch (e) {
+      console.warn('scanFolderForIndex_: parse failed for ' + name);
+      continue;
+    }
+    stats.files++;
+    const meta = { f: folderId, i: file.getId(), n: name, l: folderName };
+
+    for (const code of iterFeatureCodes_(geo)) {
+      stats.features++;
+      if (!raw[code]) raw[code] = meta;            // 原コードはそのままキーに（"10" 等の短縮コードも保持）
+      const norm = normalizeCodeString_(code);     // 6 or 7桁のみ返す
+      if (!norm) continue;
+      const key6 = (norm.length === 7) ? norm.slice(0, 6) : norm;
+      if (!norm6[key6]) {
+        norm6[key6] = { f: meta.f, i: meta.i, n: meta.n, l: meta.l, r: code, t: 'any' };
+      }
+    }
+  }
+}
+
+/** GeoJSON(Feature/FeatureCollection)から各フィーチャの地域コード文字列を列挙（runtimeと同じキー優先順） */
+function iterFeatureCodes_(geo) {
+  const out = [];
+  const pushCode = (ft) => {
+    if (!ft || ft.type !== 'Feature') return;
+    const p = ft.properties || {};
+    const v = p.regioncode ?? p.code ?? p.Code ?? p.AREA_CODE;
+    if (v === undefined || v === null) return;
+    const s = (typeof v === 'number') ? String(v) : String(v).trim();
+    if (s) out.push(s);
+  };
+  if (geo && geo.type === 'Feature') {
+    pushCode(geo);
+  } else if (geo && geo.type === 'FeatureCollection' && Array.isArray(geo.features)) {
+    for (var i = 0; i < geo.features.length; i++) pushCode(geo.features[i]);
+  }
+  return out;
+}
+
+/** 親フォルダ直下の同名ファイルを上書き、無ければ新規作成して書き込む */
+function writeIndexToDrive_(folder, name, content) {
+  const existing = findFileInFolderByName_(folder.getId(), name);
+  if (existing) {
+    existing.setContent(content);
+    return existing;
+  }
+  return folder.createFile(name, content, 'application/json');
+}
+
 /** インデックスのサマリ確認 */
 function getIndexStats() {
   const idx = loadRegionIndex_();
