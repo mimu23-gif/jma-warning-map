@@ -1,0 +1,31 @@
+# 対応表インデックス（DriveのファイルIDを多数含むため非公開。実行時はDriveから読み込む）
+/region-index.json
+
+# 気象庁から取得した生データの巨大ダンプ（再取得可能・GitHubの単一ファイル100MB上限を超える）
+/1saibun.json
+/areas_warning.json
+/matome.json
+/municipalities_warning.json
+
+# 境界用GeoJSON（気象庁の配布データそのもの。取得元はREADME参照）
+/1saibun/
+/hukenyohoukutou/
+/sikutyousonnwomatometatiikitou/
+/sityousontou/
+
+# 古い試作・作業フォルダ
+/old/
+/GEODATA/
+
+# 気象庁の公式PDF/Excel資料（再配布せず、READMEからリンクする）
+/参考資料/
+
+# 旧UIモック（MAP.htmlに統合済み・未使用）
+/doctype.html
+
+# clasp のプロジェクト紐付け（scriptIdは利用者ごとに異なる。`clasp create`/`clasp clone`で再生成）
+/.clasp.json
+
+# OS/エディタ
+.DS_Store
+Thumbs.db

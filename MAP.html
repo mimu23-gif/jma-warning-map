@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>警報発令エリア 可視化（UIモック）</title>
+  <!-- Leaflet (CDN) — integrity（SRI）でCDN改ざん時の任意JS実行を防止 -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #11162a;
+      --panel-2: #0f1530;
+      --text: #eaeef9;
+      --muted: #a8b0c7;
+      --brand: #5aa2ff;
+      --ok: #42d392;
+      --warn: #ffcc66;
+      --danger: #ff667a;
+    }
+    html, body { height: 100%; margin: 0; background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, Segoe UI, Roboto, "Hiragino Kaku Gothic ProN", "Noto Sans JP", Meiryo, sans-serif; }
+    .app { display: grid; grid-template-rows: 56px 1fr 28px; grid-template-columns: 280px 1fr 320px; height: 100%; }
+    header { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding: 0 16px; background: linear-gradient(180deg, #101735, #0b1020); border-bottom: 1px solid #1b2548; }
+    header .title { font-size: 16px; letter-spacing: 0.1em; color: #d9e7ff; }
+    header .pill { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 12px; border-radius: 999px; background: #0f1b3a; border: 1px solid #203368; color: var(--muted); }
+    header .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 8px rgba(66,211,146,.6); }
+
+    aside { background: var(--panel); overflow: auto; position: relative; z-index: 5; }
+    aside.aside-left { border-right: 1px solid #1b2548; box-shadow: 2px 0 8px rgba(0,0,0,.25); }
+    aside.aside-right { border-left: 1px solid #1b2548; box-shadow: -2px 0 8px rgba(0,0,0,.25); }
+    .section { padding: 14px 16px; border-bottom: 1px solid #1b2548; }
+    .section.actions { position: sticky; top: 0; z-index: 10; background: var(--panel); box-shadow: 0 2px 0 rgba(0,0,0,.15); }
+    .section h3 { margin: 0 0 8px; font-size: 13px; color: #bfd6ff; letter-spacing: .08em; }
+    .control { display: grid; gap: 8px; }
+    .row { display: flex; gap: 8px; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 11px; background: var(--panel-2); border: 1px solid #22305a; border-radius: 999px; cursor: pointer; user-select: none; color: var(--text); white-space: nowrap; }
+    .chip.primary { background: #1a2a5a; border-color: #3b59c2; color: #d9e7ff; box-shadow: inset 0 0 0 1px #3b59c2, 0 0 8px rgba(58,108,217,.25); }
+    .chip input { display: none; }
+    .chip[data-active="true"] { background: #18234a; border-color: #3451a0; box-shadow: inset 0 0 0 1px #3b59c2; }
+
+    main { position: relative; z-index: 0; }
+    #map { height: 100%; width: 100%; }
+
+    .legend { position: absolute; right: 14px; top: 14px; background: rgba(11,16,32,.9); border: 1px solid #1b2548; border-radius: 10px; padding: 10px 12px; font-size: 12px; color: var(--muted); backdrop-filter: blur(6px); }
+    .legend .row { align-items: center; }
+    .swatch { width: 14px; height: 10px; border-radius: 2px; display: inline-block; margin-right: 8px; }
+
+    .toast { position: absolute; left: 50%; transform: translateX(-50%); bottom: 40px; padding: 10px 12px; font-size: 12px; color: #081022; background: #cfe1ff; border: 1px solid #8fb2ff; border-radius: 10px; display: none; }
+
+    footer { grid-column: 1 / -1; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-top: 1px solid #1b2548; background: #0c1228; font-size: 12px; color: var(--muted); }
+    footer .stat { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px solid #1b2548; border-radius: 8px; }
+
+    /* Popup content */
+    .popup { font-size: 12px; }
+    .popup .h { font-weight: 600; color: #d9e7ff; margin-bottom: 6px; }
+    .popup .kv { color: #b9c6e0; }
+
+    /* Loading state on button */
+    .chip[disabled] { opacity: 0.6; cursor: not-allowed; }
+
+    /* 地点ラベル（ある程度ズームしたときだけ表示） */
+    .point-label { background: rgba(11,16,32,.85); border: 1px solid #2a3868; color: #eaeef9; font-size: 11px; padding: 1px 6px; border-radius: 6px; box-shadow: none; }
+    .point-label::before { display: none; }
+    .leaflet-container:not(.points-zoomed-in) .point-label { display: none !important; }
+
+    /* 警報エリア内の地点リスト */
+    .warn-point-item { padding: 6px 8px; border: 1px solid #22305a; border-radius: 8px; background: var(--panel-2); cursor: pointer; }
+    .warn-point-item:hover { border-color: #3b59c2; background: #16224a; }
+    .warn-point-item .h { font-weight: 600; color: #d9e7ff; font-size: 12px; }
+    .warn-point-item .kv { color: #b9c6e0; font-size: 11px; margin-top: 2px; }
+    .muted-note { color: var(--muted); font-size: 12px; padding: 4px 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="title">警報発令エリア 可視化（UI モック）</div>
+    <div class="pill" id="lastUpdate"><span class="dot"></span><span>最終更新: --:--</span></div>
+  </header>
+
+  <aside class="aside-left">
+    <div class="section">
+      <h3 id="pointTypes1Label">地点：種別1</h3>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="btnPointAll1" class="chip" title="全選択">全選択</button>
+        <button id="btnPointNone1" class="chip" title="全解除">全解除</button>
+      </div>
+      <div class="control" id="pointTypes1"></div>
+    </div>
+
+    <div class="section">
+      <h3 id="pointTypes2Label">地点：種別2</h3>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="btnPointAll2" class="chip" title="全選択">全選択</button>
+        <button id="btnPointNone2" class="chip" title="全解除">全解除</button>
+      </div>
+      <div class="control" id="pointTypes2"></div>
+    </div>
+
+    <div class="section">
+      <h3 id="pointTypes3Label">地点：種別3</h3>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="btnPointAll3" class="chip" title="全選択">全選択</button>
+        <button id="btnPointNone3" class="chip" title="全解除">全解除</button>
+      </div>
+      <div class="control" id="pointTypes3"></div>
+    </div>
+  </aside>
+
+  <main>
+    <div id="map"></div>
+    <div class="legend">
+      <div style="font-weight:600;color:#cfe1ff; margin-bottom:6px;">レイヤ優先</div>
+      <div class="row"><span class="swatch" style="background:#0c000c;"></span>特別 ＞</div>
+      <div class="row"><span class="swatch" style="background:#aa00aa;"></span>危険 ＞</div>
+      <div class="row"><span class="swatch" style="background:#ff2800;"></span>警報 ＞</div>
+      <div class="row"><span class="swatch" style="background:#f2e700;"></span>注意</div>
+    </div>
+    <div class="toast" id="toast"></div>
+  </main>
+
+  <aside class="aside-right">
+    <!-- ★ アクションを最上部＆スティッキーに -->
+    <div class="section actions">
+      <div style="display:flex; gap:8px;">
+        <button id="btnFetch" class="chip primary" title="JMAから最新を取得">最新を取得</button>
+        <button id="btnReset" class="chip" title="初期表示に戻す">リセット</button>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>レベル選択</h3>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="btnLevelAll" class="chip" title="全選択">全選択</button>
+        <button id="btnLevelNone" class="chip" title="全解除">全解除</button>
+      </div>
+      <div class="row" id="levelChips">
+        <label class="chip" data-level="tokubetsu" title="特別警報"><input type="checkbox" checked />特別</label>
+        <label class="chip" data-level="kiken" title="危険警報"><input type="checkbox" checked />危険</label>
+        <label class="chip" data-level="keihou" title="警報"><input type="checkbox" checked />警報</label>
+        <label class="chip" data-level="chuui" title="注意報"><input type="checkbox" checked />注意</label>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>現象フィルタ</h3>
+      <div class="row" style="justify-content:flex-end;">
+        <button id="btnPhenomAll" class="chip" title="全選択">全選択</button>
+        <button id="btnPhenomNone" class="chip" title="全解除">全解除</button>
+      </div>
+      <div class="control" id="phenomena">
+        <div class="row">
+          <label class="chip" data-phenom="oame"><input type="checkbox" checked />大雨</label>
+          <label class="chip" data-phenom="dosha"><input type="checkbox" checked />土砂</label>
+          <label class="chip" data-phenom="kousui"><input type="checkbox" checked />洪水</label>
+          <label class="chip" data-phenom="takashio"><input type="checkbox" checked />高潮</label>
+        </div>
+        <div class="row">
+          <label class="chip" data-phenom="bofu"><input type="checkbox" checked />暴風</label>
+          <label class="chip" data-phenom="harou"><input type="checkbox" checked />波浪</label>
+          <label class="chip" data-phenom="oyuki"><input type="checkbox" checked />大雪</label>
+          <label class="chip" data-phenom="boufusetsu"><input type="checkbox" checked />暴風雪</label>
+        </div>
+        <div class="row">
+          <label class="chip" data-phenom="kaminari"><input type="checkbox" checked />雷</label>
+          <label class="chip" data-phenom="noumu"><input type="checkbox" checked />濃霧</label>
+          <label class="chip" data-phenom="yusetsu"><input type="checkbox" checked />融雪</label>
+          <label class="chip" data-phenom="kanso"><input type="checkbox" checked />乾燥</label>
+        </div>
+        <div class="row">
+          <label class="chip" data-phenom="nadare"><input type="checkbox" checked />なだれ</label>
+          <label class="chip" data-phenom="teion"><input type="checkbox" checked />低温</label>
+          <label class="chip" data-phenom="shimo"><input type="checkbox" checked />霜</label>
+          <label class="chip" data-phenom="chakuhyo"><input type="checkbox" checked />着氷</label>
+        </div>
+        <div class="row">
+          <label class="chip" data-phenom="chakusetsu"><input type="checkbox" checked />着雪</label>
+          <label class="chip" data-phenom="others"><input type="checkbox" checked />その他</label>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>警報発令エリア内の地点（<span id="pointsInWarningCount">0</span>件）</h3>
+      <div class="control" id="pointsInWarningList" style="max-height:220px; overflow:auto;"></div>
+    </div>
+
+    <div class="section">
+      <h3>凡例</h3>
+      <div class="control">
+        <div class="row"><span class="swatch" style="background:#0c000c;"></span>特別警報</div>
+        <div class="row"><span class="swatch" style="background:#aa00aa;"></span>危険警報</div>
+        <div class="row"><span class="swatch" style="background:#ff2800;"></span>警報</div>
+        <div class="row"><span class="swatch" style="background:#f2e700;"></span>注意報</div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>ステータス</h3>
+      <div class="control">
+        <div>未解決コード: <span id="unresolved">0</span></div>
+        <div>描画件数: <span id="drawn">0</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <footer>
+    <div class="stat">選択: <span id="sel">0</span> 件</div>
+    <div class="stat">地点: <span id="pointCount">0</span> 件</div>
+    <div class="stat">ズーム: <span id="zoom">-</span></div>
+  </footer>
+</div>
+
+<script>
+// ================================
+// 1) Leaflet 基本セットアップ
+// ================================
+const map = L.map('map', { zoomControl: true }).setView([36.3, 137.9], 5);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 18,
+  attribution: '&copy; OpenStreetMap'
+}).addTo(map);
+
+// 描画レイヤ（警報エリア）
+const warnLayer = L.geoJSON([], {
+  style: f => styleByLevel(f?.properties?.level),
+  onEachFeature: (feature, layer) => {
+    layer.bindPopup(renderPopup(feature), { className: 'popup' });
+    layer.on('click', () => updateVisibleCount());
+  }
+}).addTo(map);
+
+map.on('zoomend', () => {
+  document.getElementById('zoom').textContent = map.getZoom();
+  updatePointLabelVisibility();
+});
+
+// HTML文字列へ組み込む値は必ずこれを通す（POIシート等、外部編集される値にXSS対策を入れておく）
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
+// 気象庁の公式地図（map.html）の警報レベル別配色（ContentsCommon.getMapPlte）に合わせている
+function styleByLevel(level) {
+  // 特別＞危険＞警報＞注意
+  switch (level) {
+    case 'tokubetsu': return { color: '#0c000c', weight: 2, fillColor: '#0c000c', fillOpacity: 0.5 };
+    case 'kiken':     return { color: '#aa00aa', weight: 2, fillColor: '#aa00aa', fillOpacity: 0.5 };
+    case 'keihou':    return { color: '#ff2800', weight: 2, fillColor: '#ff2800', fillOpacity: 0.5 };
+    case 'chuui':     return { color: '#f2e700', weight: 2, fillColor: '#f2e700', fillOpacity: 0.5 };
+    default:          return { color: '#c8c8cb', weight: 1, fillColor: '#c8c8cb', fillOpacity: 0.5 };
+  }
+}
+
+function renderPopup(f) {
+  const p = f.properties || {}; 
+  const code = escapeHtml(p.code || '-');
+  const name = escapeHtml(p.name || '(名称)');
+  const kinds = escapeHtml(Array.isArray(p.kinds) ? p.kinds.join(', ') : '-');
+  const codes = escapeHtml(Array.isArray(p.codes) ? p.codes.join(', ') : '-');
+  return `<div class="h">${name}（${code}）</div>
+          <div class="kv">上位種別: ${escapeHtml(p.level || '-')} / 現象コード: [${codes}]</div>
+          <div class="kv">内訳: ${kinds}</div>`;
+}
+
+function fitToData() {
+  try {
+    const b = warnLayer.getBounds();
+    if (b.isValid()) map.fitBounds(b.pad(0.1));
+  } catch (_) {}
+}
+
+function updateVisibleCount() {
+  const { levelSet, phenSet } = getActiveFilterSets();
+  let vis = 0;
+  warnLayer.eachLayer(layer => {
+    const f = layer && layer.feature;
+    if (f && featureMatchesFilters(f, levelSet, phenSet)) vis++;
+  });
+  document.getElementById('sel').textContent = vis;
+}
+
+// ================================
+// 2) UI: フィルタ（右パネル）
+// ================================
+const levelChips = document.getElementById('levelChips');
+levelChips.querySelectorAll('.chip').forEach(ch => {
+  const input = ch.querySelector('input');
+  if (input) input.checked = true;
+  ch.dataset.active = 'true';
+  if (input) {
+    input.addEventListener('change', (e) => {
+      ch.dataset.active = String(!!e.target.checked);
+      applyFiltersClientSide();
+    });
+  }
+  ch.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (input) {
+      input.checked = !input.checked;
+      input.dispatchEvent(new Event('change', { bubbles: false }));
+    }
+  });
+});
+
+// 現象名→R06コード集合（JMA公式コード表準拠）
+const PHENOM_MAP = {
+  oame:        ['03','10','33','43'],        // 大雨：警報/注意/特別/危険
+  dosha:       ['09','29','39','49'],        // 土砂災害：警報/注意/特別/危険
+  kousui:      ['04','18'],                  // 洪水：警報/注意
+  takashio:    ['08','19','38','48'],        // 高潮：警報/注意/特別/危険
+  bofu:        ['05','15','35'],             // 暴風：警報/強風注意/特別
+  harou:       ['07','16','37'],             // 波浪：警報/注意/特別
+  oyuki:       ['06','12','36'],             // 大雪：警報/注意/特別
+  boufusetsu:  ['02','13','32'],             // 暴風雪：警報/風雪注意/特別
+  kaminari:    ['14'],                       // 雷：注意報
+  noumu:       ['20'],                       // 濃霧：注意報
+  yusetsu:     ['17'],                       // 融雪：注意報
+  kanso:       ['21'],                       // 乾燥：注意報
+  nadare:      ['22'],                       // なだれ：注意報
+  teion:       ['23'],                       // 低温：注意報
+  shimo:       ['24'],                       // 霜：注意報
+  chakuhyo:    ['25'],                       // 着氷：注意報
+  chakusetsu:  ['26'],                       // 着雪：注意報
+  others:      ['27']                        // その他：注意報
+};
+
+document.querySelectorAll('#phenomena .chip').forEach(ch => {
+  const input = ch.querySelector('input');
+  if (input) input.checked = true;
+  ch.dataset.active = 'true';
+  if (input) {
+    input.addEventListener('change', (e) => {
+      ch.dataset.active = String(!!e.target.checked);
+      applyFiltersClientSide();
+    });
+  }
+  ch.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (input) {
+      input.checked = !input.checked;
+      input.dispatchEvent(new Event('change', { bubbles: false }));
+    }
+  });
+});
+
+// 一括選択/解除
+function setAllChips(containerSelector, active) {
+  const chips = document.querySelectorAll(containerSelector + ' .chip');
+  chips.forEach(ch => {
+    const input = ch.querySelector('input');
+    if (input) input.checked = !!active;
+    ch.dataset.active = String(!!active);
+  });
+  applyFiltersClientSide();
+}
+
+document.getElementById('btnLevelAll').addEventListener('click', () => setAllChips('#levelChips', true));
+document.getElementById('btnLevelNone').addEventListener('click', () => setAllChips('#levelChips', false));
+document.getElementById('btnPhenomAll').addEventListener('click', () => setAllChips('#phenomena', true));
+document.getElementById('btnPhenomNone').addEventListener('click', () => setAllChips('#phenomena', false));
+
+function gatherFilters() {
+  const levels = [...levelChips.querySelectorAll('.chip')]
+    .filter(ch => ch.dataset.active === 'true')
+    .map(ch => ch.dataset.level);
+
+  const phenoms = [...document.querySelectorAll('#phenomena .chip')]
+    .filter(ch => ch.dataset.active === 'true')
+    .map(ch => ch.dataset.phenom);
+
+  const phenomenaCodes = Array.from(new Set(phenoms.flatMap(k => PHENOM_MAP[k] || [])));
+  return { levels, phenomena: phenomenaCodes };
+}
+
+// 現在のフィルタを Set 化して取得
+function getActiveFilterSets() {
+  const { levels, phenomena } = gatherFilters();
+  return { levelSet: new Set(levels), phenSet: new Set(phenomena) };
+}
+
+// フィーチャがフィルタに合致するか
+function featureMatchesFilters(feature, levelSet, phenSet) {
+  const p = feature?.properties || {};
+  const codes = Array.isArray(p.codes) ? p.codes.map(String) : [];
+  // セットが空（全解除）の場合は一致しない＝全非表示
+  if (levelSet.size === 0 || phenSet.size === 0) return false;
+  const levelOk = levelSet.has(p.level);
+  const phenOk = codes.some(c => phenSet.has(c));
+  return levelOk && phenOk;
+}
+
+function applyFiltersClientSide() {
+  const { levelSet, phenSet } = getActiveFilterSets();
+  let vis = 0;
+  warnLayer.eachLayer(function(layer) {
+    const f = layer && layer.feature;
+    const visible = featureMatchesFilters(f, levelSet, phenSet);
+    const base = styleByLevel(f?.properties?.level);
+    layer.setStyle({ ...base, opacity: visible ? 1 : 0, fillOpacity: visible ? base.fillOpacity : 0 });
+    try {
+      layer.off('click');
+      if (layer._path) layer._path.style.pointerEvents = visible ? 'auto' : 'none';
+      if (visible) layer.on('click', () => updateVisibleCount());
+    } catch (_) {}
+    if (visible) vis++;
+  });
+  document.getElementById('sel').textContent = String(vis);
+  updatePointsInWarningList();
+}
+
+// ================================
+// 3.5) 点が警報ポリゴン内にあるか（Ray casting）
+// ================================
+function rayCastInRing(lng, lat, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const xi = ring[i][0], yi = ring[i][1];
+    const xj = ring[j][0], yj = ring[j][1];
+    const intersect = ((yi > lat) !== (yj > lat)) &&
+      (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi);
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function pointInPolygonCoords(lng, lat, rings) {
+  if (!rings || !rings.length) return false;
+  if (!rayCastInRing(lng, lat, rings[0])) return false; // 外周の外
+  for (let k = 1; k < rings.length; k++) {
+    if (rayCastInRing(lng, lat, rings[k])) return false; // 穴（くりぬき）の中
+  }
+  return true;
+}
+
+function pointInGeometry(lng, lat, geometry) {
+  if (!geometry) return false;
+  if (geometry.type === 'Polygon') return pointInPolygonCoords(lng, lat, geometry.coordinates);
+  if (geometry.type === 'MultiPolygon') return geometry.coordinates.some(poly => pointInPolygonCoords(lng, lat, poly));
+  return false;
+}
+
+const LEVEL_LABEL = { tokubetsu: '特別警報', kiken: '危険警報', keihou: '警報', chuui: '注意報' };
+
+function updatePointsInWarningList() {
+  const countEl = document.getElementById('pointsInWarningCount');
+  const container = document.getElementById('pointsInWarningList');
+  if (!countEl || !container) return;
+
+  const { levelSet, phenSet } = getActiveFilterSets();
+  const activeFeatures = [];
+  warnLayer.eachLayer(layer => {
+    const f = layer && layer.feature;
+    if (f && featureMatchesFilters(f, levelSet, phenSet)) activeFeatures.push(f);
+  });
+
+  container.innerHTML = '';
+  if (!activeFeatures.length) {
+    countEl.textContent = '0';
+    container.innerHTML = '<div class="muted-note">該当地点なし</div>';
+    return;
+  }
+
+  const hits = [];
+  getFilteredPoints().forEach(p => {
+    const areas = activeFeatures
+      .filter(f => pointInGeometry(p.lng, p.lat, f.geometry))
+      .map(f => f.properties || {});
+    if (areas.length) hits.push({ point: p, areas });
+  });
+
+  countEl.textContent = String(hits.length);
+  if (!hits.length) {
+    container.innerHTML = '<div class="muted-note">該当地点なし</div>';
+    return;
+  }
+
+  const LEVEL_RANK = { tokubetsu: 4, kiken: 3, keihou: 2, chuui: 1 };
+  hits.forEach(({ point, areas }) => {
+    const types = [point.type1, point.type2, point.type3].filter(Boolean).join('/');
+    const topLevel = areas.reduce((acc, a) => (LEVEL_RANK[a.level] || 0) > (LEVEL_RANK[acc] || 0) ? a.level : acc, areas[0].level);
+    const levelLabel = LEVEL_LABEL[topLevel] || topLevel || '-';
+    const areaNames = Array.from(new Set(areas.map(a => a.name).filter(Boolean))).join('・') || '-';
+    const kinds = Array.from(new Set(areas.flatMap(a => Array.isArray(a.kinds) ? a.kinds : []))).join('、') || '-';
+    const item = document.createElement('div');
+    item.className = 'warn-point-item';
+    item.innerHTML = `<div class="h">${escapeHtml(point.name)}</div><div class="kv">${escapeHtml(types || '-')}・${escapeHtml(areaNames)}（${escapeHtml(levelLabel)}）</div><div class="kv">警報内容: ${escapeHtml(kinds)}</div>`;
+    item.addEventListener('click', () => {
+      map.setView([point.lat, point.lng], Math.max(map.getZoom(), POINT_LABEL_MIN_ZOOM));
+      if (point._marker) point._marker.openPopup();
+    });
+    container.appendChild(item);
+  });
+}
+
+// ================================
+// 3) サーバ呼び出し：最新警報を取得して描画
+// ================================
+const toast = document.getElementById('toast');
+const btnFetch = document.getElementById('btnFetch');
+const btnReset = document.getElementById('btnReset');
+const unresolved = document.getElementById('unresolved');
+const drawn = document.getElementById('drawn');
+
+const FETCH_LABEL_DEFAULT = '最新を取得';
+const FETCH_LABEL_LOADING  = '最新の警報を取得中…';
+
+function showLoading(on) {
+  if (!btnFetch) return;
+  if (on) {
+    btnFetch.dataset.label = btnFetch.textContent;
+    btnFetch.textContent = FETCH_LABEL_LOADING;
+    btnFetch.setAttribute('disabled','disabled');
+  } else {
+    btnFetch.textContent = btnFetch.dataset.label || FETCH_LABEL_DEFAULT;
+    btnFetch.removeAttribute('disabled');
+  }
+}
+
+document.getElementById('btnFetch').addEventListener('click', () => {
+  const args = gatherFilters();
+  if (!google || !google.script || !google.script.run) {
+    showToast('Apps Script 連携が無効です（プレビューでは動作しません）');
+    return;
+  }
+  showLoading(true);
+  google.script.run
+    .withSuccessHandler(res => {
+      showLoading(false);
+      const fc = (res && res.type === 'FeatureCollection') ? res : { type: 'FeatureCollection', features: [] };
+      warnLayer.clearLayers();
+      warnLayer.addData(fc);
+      fitToData();
+      updateVisibleCount();
+      drawn.textContent = fc.features.length;
+      unresolved.textContent = (Array.isArray(res?.unresolved)) ? res.unresolved.length : 0;
+      if (Array.isArray(res?.unresolved) && res.unresolved.length) {
+        const head = res.unresolved.slice(0, 10).map(u => {
+          const c = (typeof u === 'string' ? u : u.code);
+          const r = (typeof u === 'string' ? '' : (u.reason || ''));
+          return r ? `${c}:${r}` : `${c}`;
+        }).join('\n');
+        unresolved.title = head;
+      } else {
+        unresolved.removeAttribute('title');
+      }
+      document.getElementById('lastUpdate').querySelector('span:last-child').textContent = '最終更新: ' + new Date().toLocaleTimeString();
+      showToast(`取得: ${fc.features.length}件 / 未解決: ${unresolved.textContent}`);
+      applyFiltersClientSide();
+    })
+    .withFailureHandler(err => {
+      showLoading(false);
+      console.error(err);
+      showToast('取得に失敗しました');
+    })
+    .getActiveWarningFeatures(args);
+});
+
+document.getElementById('btnReset').addEventListener('click', () => {
+  warnLayer.clearLayers();
+  drawn.textContent = '0';
+  unresolved.textContent = '0';
+  document.getElementById('sel').textContent = '0';
+  map.setView([36.3, 137.9], 5);
+  // フィルタ初期化（全選択状態へ戻す）
+  setAllChips('#levelChips', true);
+  setAllChips('#phenomena', true);
+  setAllPointChips(true);
+});
+
+function showToast(txt) {
+  toast.textContent = txt;
+  toast.style.display = 'block';
+  setTimeout(() => { toast.style.display = 'none'; }, 1800);
+}
+
+// ================================
+// 4) 地点（任意ポイント）レイヤ
+// ================================
+const pointsLayer = L.layerGroup().addTo(map);
+let allPoints = [];
+const POINT_LABEL_MIN_ZOOM = 10; // これ未満のズームでは名称ラベルを隠す（密集時の見づらさ対策）
+
+function updatePointLabelVisibility() {
+  map.getContainer().classList.toggle('points-zoomed-in', map.getZoom() >= POINT_LABEL_MIN_ZOOM);
+}
+
+const POINT_PALETTE = ['#5aa2ff', '#42d392', '#ffcc66', '#ff667a', '#b48bff', '#5ad1ff', '#ffa45a', '#9be564'];
+function pointColor(type) {
+  let h = 0;
+  for (let i = 0; i < type.length; i++) h = (h * 31 + type.charCodeAt(i)) >>> 0;
+  return POINT_PALETTE[h % POINT_PALETTE.length];
+}
+
+// 種別1/2/3 はそれぞれ独立した軸として扱う（AND条件：すべての軸で一致した地点だけ表示）
+const POINT_AXES = [
+  { key: 'type1', containerId: 'pointTypes1' },
+  { key: 'type2', containerId: 'pointTypes2' },
+  { key: 'type3', containerId: 'pointTypes3' }
+];
+
+function renderPointTypeChips(containerId, axisKey, values) {
+  const container = document.getElementById(containerId);
+  container.innerHTML = '';
+  values.forEach(v => {
+    const row = document.createElement('div');
+    row.className = 'row';
+
+    const label = document.createElement('label');
+    label.className = 'chip';
+    label.dataset.pointAxis = axisKey;
+    label.dataset.pointValue = v;
+    label.dataset.active = 'true';
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.checked = true;
+    input.addEventListener('change', (e) => {
+      label.dataset.active = String(!!e.target.checked);
+      applyPointFilter();
+    });
+
+    if (axisKey === 'type1') {
+      // マーカーの色は type1 のみで決まるため、色との対応が付くのは種別1のチップだけ
+      const sw = document.createElement('span');
+      sw.className = 'swatch';
+      sw.style.background = v ? pointColor(v) : '#5a6485';
+      label.appendChild(sw);
+    }
+    label.appendChild(input);
+    label.appendChild(document.createTextNode(v || '(未設定)'));
+    label.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      input.checked = !input.checked;
+      input.dispatchEvent(new Event('change', { bubbles: false }));
+    });
+
+    row.appendChild(label);
+    container.appendChild(row);
+  });
+}
+
+function getFilteredPoints() {
+  const activeByAxis = {};
+  POINT_AXES.forEach(axis => {
+    activeByAxis[axis.key] = new Set(
+      [...document.querySelectorAll(`#${axis.containerId} .chip`)]
+        .filter(ch => ch.dataset.active === 'true')
+        .map(ch => ch.dataset.pointValue)
+    );
+  });
+  return allPoints.filter(p => POINT_AXES.every(axis => activeByAxis[axis.key].has(p[axis.key] || '')));
+}
+
+function applyPointFilter() {
+  pointsLayer.clearLayers();
+  const filtered = getFilteredPoints();
+  filtered.forEach(p => {
+    const types = [p.type1, p.type2, p.type3].filter(Boolean);
+    const marker = L.circleMarker([p.lat, p.lng], {
+      radius: 7,
+      color: '#0b1020',
+      weight: 1.5,
+      fillColor: pointColor(p.type1 || '未分類'),
+      fillOpacity: 0.9
+    })
+      .bindTooltip(escapeHtml(p.name), { permanent: true, direction: 'top', offset: [0, -8], className: 'point-label' })
+      .bindPopup(
+        `<div class="h">${escapeHtml(p.name)}</div><div class="kv">種別: ${escapeHtml(types.join(', ') || '-')}</div><div class="kv">${escapeHtml(p.address || '')}</div>`,
+        { className: 'popup' }
+      )
+      .addTo(pointsLayer);
+    p._marker = marker;
+  });
+  document.getElementById('pointCount').textContent = String(filtered.length);
+  updatePointsInWarningList();
+}
+
+function setAllPointChipsIn(containerId, active) {
+  document.querySelectorAll(`#${containerId} .chip`).forEach(ch => {
+    const input = ch.querySelector('input');
+    if (input) input.checked = !!active;
+    ch.dataset.active = String(!!active);
+  });
+  applyPointFilter();
+}
+
+function setAllPointChips(active) {
+  POINT_AXES.forEach(axis => {
+    document.querySelectorAll(`#${axis.containerId} .chip`).forEach(ch => {
+      const input = ch.querySelector('input');
+      if (input) input.checked = !!active;
+      ch.dataset.active = String(!!active);
+    });
+  });
+  applyPointFilter();
+}
+
+document.getElementById('btnPointAll1').addEventListener('click', () => setAllPointChipsIn('pointTypes1', true));
+document.getElementById('btnPointNone1').addEventListener('click', () => setAllPointChipsIn('pointTypes1', false));
+document.getElementById('btnPointAll2').addEventListener('click', () => setAllPointChipsIn('pointTypes2', true));
+document.getElementById('btnPointNone2').addEventListener('click', () => setAllPointChipsIn('pointTypes2', false));
+document.getElementById('btnPointAll3').addEventListener('click', () => setAllPointChipsIn('pointTypes3', true));
+document.getElementById('btnPointNone3').addEventListener('click', () => setAllPointChipsIn('pointTypes3', false));
+
+function loadPoints() {
+  if (!google || !google.script || !google.script.run) return;
+  google.script.run
+    .withSuccessHandler(res => {
+      allPoints = (res && Array.isArray(res.items)) ? res.items : [];
+      const labels = (res && res.labels) || {};
+      if (labels.type1) document.getElementById('pointTypes1Label').textContent = labels.type1;
+      if (labels.type2) document.getElementById('pointTypes2Label').textContent = labels.type2;
+      if (labels.type3) document.getElementById('pointTypes3Label').textContent = labels.type3;
+      renderPointTypeChips('pointTypes1', 'type1', (res && res.types1) || []);
+      renderPointTypeChips('pointTypes2', 'type2', (res && res.types2) || []);
+      renderPointTypeChips('pointTypes3', 'type3', (res && res.types3) || []);
+      applyPointFilter();
+    })
+    .withFailureHandler(err => {
+      console.error('地点データの取得に失敗:', err);
+    })
+    .getPoints();
+}
+
+// 初期化
+showToast('右パネルの「最新を取得」でJMAの警報を取得（本番実行時）。');
+document.getElementById('zoom').textContent = map.getZoom();
+updatePointLabelVisibility();
+loadPoints();
+</script>
+</body>
+</html>
