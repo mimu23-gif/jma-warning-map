@@ -29,14 +29,45 @@ Google Apps Script（GAS）製の Web アプリです。
 - `https://www.jma.go.jp/bosai/warning/data/r8/map.json` — 全国の現況警報・注意報フィード
 - `https://www.jma.go.jp/bosai/common/const/area.json` — 地域コードの階層情報
 
-### 警報エリアの境界データ（GeoJSON）
+### 警報エリアの境界データ（ポリゴン）
 
-地図上に警報エリアを塗るためのポリゴンは、気象庁の防災情報XML/地図描画用データ配布ページから
-取得した GeoJSON を Google Drive にアップロードし、`Code.js` が `DriveApp` 経由で読み込んでいます。
+地図上に警報エリアを塗るためのポリゴンは、気象庁の
+[予報区等GISデータ](https://www.data.jma.go.jp/developer/gis.html)
+（**シェープファイル・全国一括ZIP・世界測地系JGD2011**）を元データとして使用します。
+これを GeoJSON に変換し、都道府県別ファイルへ分割したものを Google Drive にアップロードし、
+`Code.js` が `DriveApp` 経由で読み込みます。
 
-このリポジトリには境界GeoJSONの実体（`1saibun/`, `hukenyohoukutou/`,
-`sikutyousonnwomatometatiikitou/`, `sityousontou/`、合計約195MB）は含めていません。
-必要な場合は気象庁の配布ページから同様のファイルを取得し、ルート直下に同名フォルダとして配置してください。
+本アプリが使う4区分とダウンロードファイルの対応:
+
+| ローカルフォルダ | 気象庁GISの区分 | ダウンロードするZIP |
+|---|---|---|
+| `1saibun/` | 一次細分区域等 | `20190125_AreaForecastLocalM_1saibun_GIS.zip` |
+| `hukenyohoukutou/` | 府県予報区等 | `20190125_AreaForecastLocalM_prefecture_GIS.zip` |
+| `sikutyousonnwomatometatiikitou/` | 市町村等をまとめた地域等 | `20230517_AreaForecastLocalM_matome_GIS.zip` |
+| `sityousontou/` | 市町村等（**気象警報・注意報**） | `20260226_AreaInformationCity_weather_GIS.zip` |
+
+> 「市町村等」は6種（気象警報／土砂災害／河川洪水／大雨危険度／地震津波／火山）あり、本アプリが使うのは
+> **気象警報・注意報（`weather`）** です。ファイル名先頭の日付は気象庁の更新日で将来変わることがあるため、
+> ページ掲載の最新版を取得してください。
+
+このリポジトリには境界データの実体（合計約195MB）も、変換・分割の出力フォルダも含めていません。
+再現手順:
+
+1. 上表の4ファイルを上記ページからダウンロードし、`gis_src/` に置く（`.zip` のままで可）
+2. シェープ → GeoJSON 変換＋都道府県分割を実行（[build_geojson_folders.py](build_geojson_folders.py)）
+   ```
+   pip install geopandas
+   python build_geojson_folders.py --src ./gis_src --out .
+   ```
+   → `1saibun/` `hukenyohoukutou/` `sikutyousonnwomatometatiikitou/` `sityousontou/` に
+   `<都道府県コード>_<英名>_<種別>.geojson`（例: `10_gunma_area.geojson`）が出力されます。
+3. 生成した4フォルダを Drive の `AREA_GEO_PARENT_ID` フォルダ配下にアップロード
+4. GASの `admin_buildRegionIndex` を実行して `region-index.json` を生成（[正規化パイプライン](#正規化パイプライン)参照）
+
+> 注: シェープファイルの属性（DBF）は文字コードが Shift_JIS（cp932）のことが多く、スクリプトは
+> cp932 → utf-8 の順で読み込みを試みます。座標系 JGD2011 は WGS84 互換のため、出力は EPSG:4326（lon/lat）で
+> そのままWeb地図に使えます。なお、シェープファイルの解析・大容量GeoJSONの分割はGASの実行時間・メモリ制限に
+> 不向きなため、この前処理だけはローカル（geopandas）で行う構成にしています。
 
 ### 正規化パイプライン
 
