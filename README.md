@@ -33,41 +33,48 @@ Google Apps Script（GAS）製の Web アプリです。
 
 地図上に警報エリアを塗るためのポリゴンは、気象庁の
 [予報区等GISデータ](https://www.data.jma.go.jp/developer/gis.html)
-（**シェープファイル・全国一括ZIP・世界測地系JGD2011**）を元データとして使用します。
-これを GeoJSON に変換し、都道府県別ファイルへ分割したものを Google Drive にアップロードし、
-`Code.js` が `DriveApp` 経由で読み込みます。
+（**シェープファイル・全国一括ZIP・世界測地系JGD2011**）を GeoJSON に変換し、都道府県別に分割したものです。
+`Code.js` が Google Drive 上のこれらを `DriveApp` 経由で読み込みます。
 
-本アプリが使う4区分とダウンロードファイルの対応:
+**Python等のローカル環境が用意できなくても使えるよう、変換・分割済みのGeoJSONをリポジトリに同梱しています**
+（4フォルダ・合計約193MB・単一ファイル最大約6MB）。本アプリが使う4区分と元データの対応:
 
-| ローカルフォルダ | 気象庁GISの区分 | ダウンロードするZIP |
+| 同梱フォルダ | 気象庁GISの区分 | 元データ（更新時のダウンロード元ZIP） |
 |---|---|---|
 | `1saibun/` | 一次細分区域等 | `20190125_AreaForecastLocalM_1saibun_GIS.zip` |
 | `hukenyohoukutou/` | 府県予報区等 | `20190125_AreaForecastLocalM_prefecture_GIS.zip` |
 | `sikutyousonnwomatometatiikitou/` | 市町村等をまとめた地域等 | `20230517_AreaForecastLocalM_matome_GIS.zip` |
 | `sityousontou/` | 市町村等（**気象警報・注意報**） | `20260226_AreaInformationCity_weather_GIS.zip` |
 
-> 「市町村等」は6種（気象警報／土砂災害／河川洪水／大雨危険度／地震津波／火山）あり、本アプリが使うのは
-> **気象警報・注意報（`weather`）** です。ファイル名先頭の日付は気象庁の更新日で将来変わることがあるため、
-> ページ掲載の最新版を取得してください。
+#### 使い方（クローン後・Python不要）
 
-このリポジトリには境界データの実体（合計約195MB）も、変換・分割の出力フォルダも含めていません。
-再現手順:
+1. 同梱の4フォルダ（`1saibun/` 等）を Google Drive の `AREA_GEO_PARENT_ID` フォルダ配下にアップロード
+2. GASの `admin_buildRegionIndex` を実行して `region-index.json` を生成（[正規化パイプライン](#正規化パイプライン)参照）
 
-1. 上表の4ファイルを上記ページからダウンロードし、`gis_src/` に置く（`.zip` のままで可）
-2. シェープ → GeoJSON 変換＋都道府県分割を実行（[build_geojson_folders.py](build_geojson_folders.py)）
+#### データを更新する場合（気象庁の最新版へ差し替え・geopandasが必要）
+
+同梱データは特定時点のスナップショットです。最新の境界に更新したいときだけ、元データから再生成します。
+
+1. 上表のZIPを[配布ページ](https://www.data.jma.go.jp/developer/gis.html)からダウンロードし `gis_src/` に置く（`.zip` のままで可）
+2. シェープ → GeoJSON 変換＋都道府県分割（[build_geojson_folders.py](build_geojson_folders.py)）:
    ```
    pip install geopandas
    python build_geojson_folders.py --src ./gis_src --out .
    ```
-   → `1saibun/` `hukenyohoukutou/` `sikutyousonnwomatometatiikitou/` `sityousontou/` に
-   `<都道府県コード>_<英名>_<種別>.geojson`（例: `10_gunma_area.geojson`）が出力されます。
-3. 生成した4フォルダを Drive の `AREA_GEO_PARENT_ID` フォルダ配下にアップロード
-4. GASの `admin_buildRegionIndex` を実行して `region-index.json` を生成（[正規化パイプライン](#正規化パイプライン)参照）
+   → 4フォルダの `<都道府県コード>_<英名>_<種別>.geojson`（例: `10_gunma_area.geojson`）が再生成されます。
 
-> 注: シェープファイルの属性（DBF）は文字コードが Shift_JIS（cp932）のことが多く、スクリプトは
-> cp932 → utf-8 の順で読み込みを試みます。座標系 JGD2011 は WGS84 互換のため、出力は EPSG:4326（lon/lat）で
-> そのままWeb地図に使えます。なお、シェープファイルの解析・大容量GeoJSONの分割はGASの実行時間・メモリ制限に
-> 不向きなため、この前処理だけはローカル（geopandas）で行う構成にしています。
+> 補足: 「市町村等」は6種（気象警報／土砂災害／河川洪水／大雨危険度／地震津波／火山）あり、本アプリは
+> **気象警報・注意報（`weather`）** を使用。ZIP名先頭の日付は更新日で将来変わります。シェープの属性（DBF）は
+> Shift_JIS（cp932）が多く、スクリプトは cp932 → utf-8 の順で読み込みます。座標系 JGD2011 は WGS84 互換で、
+> 出力は EPSG:4326（lon/lat）です。シェープ解析や大容量GeoJSONの分割はGASの実行時間・メモリ制限に不向きなため、
+> この更新処理のみローカル（geopandas）で行う構成です。
+
+#### データの出典・ライセンス
+
+同梱の境界GeoJSONは、気象庁「予報区等GISデータ」を加工（GeoJSON変換・都道府県分割）して作成したものです。
+出典: [気象庁 予報区等GISデータ](https://www.data.jma.go.jp/developer/gis.html)（利用は気象庁ホームページの
+利用規約に従ってください）。本リポジトリのコードの[MITライセンス](LICENSE)は、これら気象庁由来のデータには
+適用されません。
 
 ### 正規化パイプライン
 

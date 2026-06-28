@@ -1,0 +1,2 @@
+# 境界GeoJSONはLF固定（Windowsチェックアウト時のCRLF変換・差分肥大を防ぐ）
+*.geojson text eol=lf

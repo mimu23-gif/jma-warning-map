@@ -7,12 +7,6 @@
 /matome.json
 /municipalities_warning.json
 
-# 境界用GeoJSON（気象庁の配布データそのもの。取得元はREADME参照）
-/1saibun/
-/hukenyohoukutou/
-/sikutyousonnwomatometatiikitou/
-/sityousontou/
-
 # 古い試作・作業フォルダ
 /old/
 /GEODATA/
