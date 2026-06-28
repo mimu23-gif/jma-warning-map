@@ -211,6 +211,7 @@
     <div class="stat">選択: <span id="sel">0</span> 件</div>
     <div class="stat">地点: <span id="pointCount">0</span> 件</div>
     <div class="stat">ズーム: <span id="zoom">-</span></div>
+    <div class="stat" style="margin-left:auto;">出典: 気象庁（警報・注意報／予報区等GIS）｜気象庁発表を表示</div>
   </footer>
 </div>
 
@@ -226,6 +227,7 @@ L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
 
 // 描画レイヤ（警報エリア）
 const warnLayer = L.geoJSON([], {
+  attribution: '警報区域・警報/注意報: 気象庁',
   style: f => styleByLevel(f?.properties?.level),
   onEachFeature: (feature, layer) => {
     layer.bindPopup(renderPopup(feature), { className: 'popup' });
