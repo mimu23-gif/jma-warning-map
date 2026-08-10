@@ -1,0 +1,16 @@
+{
+  "port": 8787,
+  "portTries": 10,
+  "browser": "default",
+  "webDir": "web",
+  "dataDir": "..",
+  "pointsCsv": "../points.csv",
+  "indexCache": "region-index-local.json",
+  "geoCacheFiles": 8,
+  "geoFolders": [
+    "1saibun",
+    "hukenyohoukutou",
+    "sikutyousonnwomatometatiikitou",
+    "sityousontou"
+  ]
+}

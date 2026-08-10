@@ -1,2 +1,5 @@
 # 境界GeoJSONはLF固定（Windowsチェックアウト時のCRLF変換・差分肥大を防ぐ）
 *.geojson text eol=lf
+
+# バッチファイルはCRLF固定（LFだと括弧ブロックやラベルの解釈がcmd.exeで壊れることがある）
+*.bat text eol=crlf

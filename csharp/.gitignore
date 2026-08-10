@@ -1,0 +1,9 @@
+# ビルド成果物と実行時に生成されるファイル
+JmaMap.exe
+JmaMap.pdb
+jmamap.log
+selftest.txt
+runtime-port.txt
+
+# 索引キャッシュ（絶対パスを含む。起動時に自動再生成される）
+region-index-local.json

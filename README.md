@@ -5,6 +5,9 @@ Google Apps Script（GAS）製の Web アプリです。
 
 ![スクリーンショット](Screenshot/スクリーンショット%202026-06-28%20193024.png)
 
+> GASを使わず **Windows標準機能だけ** で同じ画面を動かすC#移植版を [`csharp/`](csharp/) に同梱しています
+> （インストール・管理者権限・追加ランタイム不要）。→ [C#移植版](#c移植版windows標準機能のみgas不要)
+
 ## 構成
 
 | ファイル | 役割 |
@@ -184,9 +187,39 @@ npx clasp push
 Apps Scriptエディタの「デプロイを管理」から既存デプロイを編集し、「新しいバージョン」として
 デプロイし直す必要があります。
 
+## C#移植版（Windows標準機能のみ・GAS不要）
+
+同じ画面とロジックを、Windowsに最初から入っているものだけで動くC#アプリへ移植したものを
+[`csharp/`](csharp/) に置いています。GoogleアカウントもDriveもスプレッドシートも使わず、
+ローカルにHTTPサーバを立てて既定ブラウザに地図を表示します。
+
+- Visual Studio / .NET SDK / NuGet / MSBuild / Node.js は不要。Windows同梱の `csc.exe` でビルドします
+- [csharp/build.bat](csharp/build.bat) をダブルクリック → `JmaMap.exe`（約43KB）が生成され、
+  実行するとブラウザに地図が開き、タスクトレイに常駐します
+- インストール・管理者権限・ファイアウォール許可は不要（`localhost` に固定バインド）
+- 境界GeoJSONはこのリポジトリのフォルダを直接読み、POIは [points.csv](points.csv) を読みます
+- ソースはすべてプレーンテキストで、`.csproj` も `.ico` も使わない（メモ帳だけで編集・ビルドできる）構成です
+
+| GAS版 | C#移植版 |
+|---|---|
+| `doGet()` / `HtmlService` | `HttpListener` が `web/map.html` を返す |
+| `google.script.run` | `fetch()` |
+| `DriveApp` + `region-index.json`（DriveファイルID） | ローカルフォルダの直読み（起動時に索引を構築・キャッシュ） |
+| `SpreadsheetApp` | `points.csv` |
+| `CacheService`（95KB上限） | メモリ上のキャッシュ |
+| `PropertiesService` | [csharp/settings.json](csharp/settings.json) |
+
+地域コードの6桁/7桁正規化、`class10s` の子コード展開、政令市の親コードへのフォールバック、
+レベル判定といったロジックはGAS版と同じ規則を移してあります。索引の構築結果
+（188ファイル・2602フィーチャ・raw 2210件・norm6 2123件）もGAS版の `admin_buildRegionIndex` と一致します。
+
+セットアップ・設定項目・制約は [csharp/README.md](csharp/README.md) を参照してください。
+
 ## ライセンス
 
 本リポジトリの**コード**は [MIT License](LICENSE) です。
+ただし `csharp/web/leaflet.js` / `csharp/web/leaflet.css` は同梱した
+[Leaflet](https://leafletjs.com/) 1.9.4（BSD-2-Clause）であり、同ライブラリのライセンスに従います。
 
 ただし、同梱の境界GeoJSON（`1saibun/` ほか）および実行時に表示する警報・注意報は**気象庁由来のデータ・情報**であり、
 MITは適用されません。これらの利用は[気象庁ホームページの利用規約](https://www.jma.go.jp/jma/kishou/info/coment.html)
