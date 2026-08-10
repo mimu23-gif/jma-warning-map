@@ -1,6 +1,8 @@
 # ビルド成果物と実行時に生成されるファイル
 JmaMap.exe
 JmaMap.pdb
+GeoTool.exe
+GeoTool.pdb
 jmamap.log
 selftest.txt
 runtime-port.txt

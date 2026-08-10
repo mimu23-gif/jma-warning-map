@@ -12,6 +12,8 @@ namespace JmaMap
         public string Name;      // 区域名
         public int GeomStart;    // geometry 値の開始位置（'{'）
         public int GeomEnd;      // geometry 値の終端（次の文字の位置）
+        public int PropsStart;   // properties 値の開始位置（'{'）。変換ツールが差し替えに使う
+        public int PropsEnd;     // properties 値の終端（次の文字の位置）
     }
 
     public static class GeoJson
@@ -109,7 +111,9 @@ namespace JmaMap
                     Json.SkipWs(text, ref i);
                     if (i < text.Length && text[i] == '{')
                     {
+                        fr.PropsStart = i;
                         Dictionary<string, object> props = Json.ParseObject(text, ref i);
+                        fr.PropsEnd = i;
                         fr.Code = FirstOf(props, CodeKeys);
                         fr.Name = FirstOf(props, NameKeys);
                     }

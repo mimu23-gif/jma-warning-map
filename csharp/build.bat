@@ -27,11 +27,31 @@ echo Building JmaMap.exe ...
 
 if errorlevel 1 (
   echo.
-  echo BUILD FAILED
+  echo BUILD FAILED ^(JmaMap.exe^)
+  pause
+  exit /b 1
+)
+
+echo Building GeoTool.exe ...
+
+"%CSC%" /nologo /target:exe /optimize+ /out:"%~dp0GeoTool.exe" ^
+  /r:System.dll ^
+  /r:System.Core.dll ^
+  /r:System.IO.Compression.dll ^
+  /r:System.IO.Compression.FileSystem.dll ^
+  /r:System.Numerics.dll ^
+  "%~dp0geotool\*.cs" ^
+  "%~dp0src\Json.cs" ^
+  "%~dp0src\GeoJson.cs"
+
+if errorlevel 1 (
+  echo.
+  echo BUILD FAILED ^(GeoTool.exe^)
   pause
   exit /b 1
 )
 
 echo.
 echo BUILD OK -^> %~dp0JmaMap.exe
+echo BUILD OK -^> %~dp0GeoTool.exe
 pause

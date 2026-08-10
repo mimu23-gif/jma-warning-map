@@ -85,6 +85,55 @@ csharp\
     leaflet.js / .css       Leaflet 1.9.4（BSD-2-Clause）を同梱
 ```
 
+## GeoTool.exe（境界データ変換ツール）
+
+気象庁の予報区等GIS（シェープファイル）から、このアプリが使う都道府県別GeoJSONを作るCLIです。
+`tools/build_geojson_folders.py`（geopandas必須）と同じ成果物を、**Python無しで**作れます。
+
+```
+GeoTool.exe convert     --in <ZIP|SHP> --out <出力フォルダ> [--suffix area] [--encoding cp932] [--layer 名前の一部]
+GeoTool.exe shp2geojson --in <ZIP|SHP> --out <全国版.geojson>
+GeoTool.exe split       --in <全国版.geojson> --out <出力フォルダ> [--suffix area]
+GeoTool.exe merge       --in <都道府県別フォルダ> --out <全国版.geojson>
+```
+
+例（配布ZIPをそのまま渡せます。展開不要）:
+
+```
+GeoTool.exe convert --in ..\_work\gis_src\20230517_AreaForecastLocalM_matome_GIS.zip ^
+                    --out ..\data\boundaries\sikutyousonnwomatometatiikitou
+```
+
+### 実装上の要点
+
+- **座標変換をしない**のが成立の鍵です。気象庁の予報区等GISはJGD2011の*地理座標*（経緯度）で配布され、
+  JGD2011とWGS84の差はセンチメートル級なので、EPSG:4326としてそのまま出力できます
+  （Python版の `to_crs(4326)` も実質無変換）。投影座標系（PROJCS）の入力は `.prj` を見て拒否します
+- シェープファイルはリングを平坦に並べるだけなので、**外周と穴は符号付き面積で判別**します
+  （ESRI仕様：外周=時計回り、穴=反時計回り）
+- 座標は「doubleの厳密な10進展開を小数15桁へ正しく丸めた表記」で書きます。
+  .NET Frameworkの `ToString("F15")` は有効数字15桁で頭打ちになり精度が落ちるため、
+  `BigInteger` で厳密に計算しています
+- ZIP内のエントリ名は日本語かつ古いものはCP932のまま（UTF-8フラグ無し）なので、
+  **名前を見ずに拡張子だけで取り出します**
+- DBFの文字コードは `.cpg` →（無ければ）レコード領域のUTF-8妥当性→CP932 の順で判定します
+
+### 検証結果
+
+| 検証 | 結果 |
+|---|---|
+| `split` の往復（既存188ファイル→全国版→再分割） | **188/188 が SHA256 まで完全一致** |
+| `shp2geojson` vs geopandas（同一シェープファイル） | 属性・ジオメトリ型・座標構造すべて一致、**座標2,113,096点が誤差0.0** |
+| 気象庁の実配布ZIP4本からの `convert` | 全て変換成功（Python版は府県予報区ZIPの読み込みに失敗する） |
+
+同一ZIPからPython版と比較すると、次の点で**C#版のほうが忠実**です。
+
+- **属性の文字コード**: 1saibun のDBFは実際にはUTF-8（言語ドライバID=0x00・`.cpg`無し）。
+  GDALはCP932と誤認して `津軽` を `豢･霆ｽ` にしてしまうが、本ツールは正しく読む
+- **座標**: GDALは短い表記に丸める際に数ULPずれることがある（例: 真値が `140.45000000000005` でも
+  `140.45` と書く）。本ツールは読み取ったdoubleを厳密に書き出す
+- **ZIPの互換性**: GDALの `/vsizip` はCP932エントリ名のZIPを開けないことがあるが、本ツールは影響を受けない
+
 ## エンドポイント
 
 | メソッド | パス | 内容 |

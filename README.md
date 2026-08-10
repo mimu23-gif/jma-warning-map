@@ -77,11 +77,22 @@ Google Apps Script（GAS）製の Web アプリです。
 同梱データは特定時点のスナップショットです。最新の境界に更新したいときだけ、元データから再生成します。
 
 1. 上表のZIPを[配布ページ](https://www.data.jma.go.jp/developer/gis.html)からダウンロードし `_work/gis_src/` に置く（`.zip` のままで可）
-2. シェープ → GeoJSON 変換＋都道府県分割（[tools/build_geojson_folders.py](tools/build_geojson_folders.py)）:
+2. シェープ → GeoJSON 変換＋都道府県分割。**Python版とC#版のどちらでも同じ成果物が作れます。**
+
+   C#版（推奨・追加インストール不要）:
+   ```
+   csharp\GeoTool.exe convert --in _work\gis_src\20230517_AreaForecastLocalM_matome_GIS.zip ^
+                              --out data\boundaries\sikutyousonnwomatometatiikitou
+   ```
+   Python版（[tools/build_geojson_folders.py](tools/build_geojson_folders.py)）:
    ```
    pip install geopandas
    python tools/build_geojson_folders.py
    ```
+
+   > C#版を推奨するのは、DBFの文字コード判定・ZIPのエントリ名（CP932）・座標の丸めの3点で
+   > Python版（GDAL）より忠実に読めることを実データで確認しているためです。詳細は
+   > [csharp/README.md](csharp/README.md#geotoolexe境界データ変換ツール) を参照してください。
    → 4フォルダの `<都道府県コード>_<英名>_<種別>.geojson`（例: `10_gunma_area.geojson`）が再生成されます。
 
 > 補足: 「市町村等」は6種（気象警報／土砂災害／河川洪水／大雨危険度／地震津波／火山）あり、本アプリは
