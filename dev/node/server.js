@@ -8,7 +8,8 @@ const { createGasMocks } = require('./gas-mocks');
 const { prefetchAll } = require('./prefetch');
 
 const PORT = process.env.PORT || 8787;
-const REPO_ROOT = path.join(__dirname, '..');
+const REPO_ROOT = path.join(__dirname, '..', '..');
+const GAS_DIR = path.join(REPO_ROOT, 'gas');
 const CONTEXT_TTL_MS = 60 * 1000; // Code.js 内のWARN_MAP_R8キャッシュ(60秒)と揃える
 
 function buildContext(prefetched) {
@@ -19,7 +20,7 @@ function buildContext(prefetched) {
   };
   const context = vm.createContext(sandbox);
   for (const fname of ['Code.js', 'Points.js']) {
-    const src = fs.readFileSync(path.join(REPO_ROOT, fname), 'utf8');
+    const src = fs.readFileSync(path.join(GAS_DIR, fname), 'utf8');
     vm.runInContext(src, context, { filename: fname });
   }
   return context;
@@ -80,7 +81,7 @@ const RUN_SHIM = `
 `;
 
 function serveMapHtml(res) {
-  const html = fs.readFileSync(path.join(REPO_ROOT, 'MAP.html'), 'utf8');
+  const html = fs.readFileSync(path.join(GAS_DIR, 'MAP.html'), 'utf8');
   const withShim = html.replace('<head>', '<head>' + RUN_SHIM);
   res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
   res.end(withShim);

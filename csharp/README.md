@@ -1,6 +1,6 @@
 # 警報発令エリア 可視化（C# / Windows標準機能のみ版）
 
-リポジトリ直下の Google Apps Script 版を、**Windowsに最初から入っているものだけ**で動く
+[`gas/`](../gas/) の Google Apps Script 版を、**Windowsに最初から入っているものだけ**で動く
 C#アプリへ移植したものです。ローカルにHTTPサーバを立て、既定ブラウザで地図を表示します。
 
 - **インストール不要** — 単一の `JmaMap.exe`（43KB）と設定ファイルだけ
@@ -57,9 +57,9 @@ BUILD OK -> ...\csharp\JmaMap.exe
 | `port` | `8787` | 待ち受けポート。埋まっていたら `portTries` 個ぶん繰り上げる |
 | `portTries` | `10` | ポートを試す回数 |
 | `browser` | `"default"` | `"default"`＝既定ブラウザ／`"app"`＝Edgeのアプリモード（アドレスバー無しの専用ウィンドウ） |
-| `dataDir` | `".."` | 境界GeoJSONと `points.csv` を置いた場所（既定はリポジトリ直下） |
+| `dataDir` | `"../data/boundaries"` | 境界GeoJSONの4フォルダを置いた場所 |
 | `geoFolders` | 4フォルダ | 走査する境界GeoJSONのフォルダ名 |
-| `pointsCsv` | `"../points.csv"` | POI（任意地点）CSVの場所 |
+| `pointsCsv` | `"../data/points.csv"` | POI（任意地点）CSVの場所 |
 | `geoCacheFiles` | `8` | メモリに載せるGeoJSONファイル数の上限 |
 | `indexCache` | `region-index-local.json` | 索引キャッシュの保存先 |
 
@@ -102,7 +102,7 @@ csharp\
 | `doGet()` + `HtmlService` | `HttpListener` が `map.html` を返す |
 | `google.script.run` | `fetch()` |
 | `DriveApp` + `region-index.json`（DriveファイルID） | ローカルフォルダの直読み（パスが識別子） |
-| `SpreadsheetApp` | `points.csv` |
+| `SpreadsheetApp` | `data/points.csv` |
 | `CacheService`（95KB上限） | メモリ上のキャッシュ（上限対策が不要になった） |
 | `PropertiesService` | `settings.json` |
 | `assertOwner_()` | ローカル単独実行のため概念ごと不要 |
@@ -147,7 +147,7 @@ csharp\
 
 同梱・表示するデータはMITの対象外です。
 
-- **境界GeoJSON**（`../1saibun/` ほか）:
+- **境界GeoJSON**（[`../data/boundaries/`](../data/boundaries/)）:
   「気象庁『予報区等GISデータ』（https://www.data.jma.go.jp/developer/gis.html ）を加工して作成」
   （シェープファイルをGeoJSONへ変換し、都道府県別に分割）
 - **警報・注意報**（実行時に表示）:

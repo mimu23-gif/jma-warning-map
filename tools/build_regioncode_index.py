@@ -56,12 +56,13 @@ def extract_regioncodes_from_file(file_path: Path) -> Set[str]:
 
 
 def main() -> None:
-    workspace = Path(__file__).resolve().parent.parent
+    workspace = Path(__file__).resolve().parent.parent  # リポジトリのルート（tools/ の1つ上）
+    boundaries = workspace / "data" / "boundaries"
     targets = [
-        workspace / "GAS" / "1saibun",
-        workspace / "GAS" / "hukenyohoukutou",
-        workspace / "GAS" / "sikutyousonnwomatometatiikitou",
-        workspace / "GAS" / "sityousontou",
+        boundaries / "1saibun",
+        boundaries / "hukenyohoukutou",
+        boundaries / "sikutyousonnwomatometatiikitou",
+        boundaries / "sityousontou",
     ]
 
     index: Dict[str, List[Dict[str, str]]] = {}
@@ -90,7 +91,7 @@ def main() -> None:
                 if entry not in index[rc]:
                     index[rc].append(entry)
 
-    out_dir = workspace / "GAS" / "taiouhyou"
+    out_dir = workspace / "data" / "regioncode"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     # JSON 出力

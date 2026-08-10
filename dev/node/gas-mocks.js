@@ -2,19 +2,22 @@
 const fs = require('fs');
 const path = require('path');
 
-const REPO_ROOT = path.join(__dirname, '..');
+const REPO_ROOT = path.join(__dirname, '..', '..');
+const BOUNDARY_DIR = path.join(REPO_ROOT, 'data', 'boundaries');
+// GASの admin_buildRegionIndex が生成したものをDriveから落として置く場所（gitignore対象）
+const INDEX_PATH = path.join(REPO_ROOT, '_work', 'region-index.json');
 
 /** region-index.json の raw/norm6 から fileId -> ローカルパス の対応表を作る */
 function buildFileIdMap() {
-  const indexPath = path.join(REPO_ROOT, 'region-index.json');
-  const idx = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
+  const idx = JSON.parse(fs.readFileSync(INDEX_PATH, 'utf8'));
   const map = new Map();
   for (const dictName of ['raw', 'norm6']) {
     const dict = idx[dictName] || {};
     for (const key of Object.keys(dict)) {
       const entry = dict[key];
       if (!entry || !entry.i || map.has(entry.i)) continue;
-      map.set(entry.i, path.join(REPO_ROOT, entry.l, entry.n));
+      // entry.l はDrive上のフォルダ名（1saibun 等）。ローカルでは data/boundaries/ 配下に対応する。
+      map.set(entry.i, path.join(BOUNDARY_DIR, entry.l, entry.n));
     }
   }
   return map;
@@ -33,6 +36,11 @@ function createGasMocks(prefetched) {
   const fileIdMap = buildFileIdMap();
   const cacheStore = new Map();
   const propsStore = new Map();
+
+  // 本番は Script Properties に利用者ごとのIDが入る。モックのDriveApp/SpreadsheetAppは
+  // IDの中身を見ずローカルファイルへ流すので、未設定エラーを避けるためダミーを入れておく。
+  propsStore.set('AREA_GEO_PARENT_ID', 'local-mock-folder');
+  propsStore.set('POINTS_SPREADSHEET_ID', 'local-mock-spreadsheet');
 
   const UrlFetchApp = {
     fetch(url) {
@@ -62,7 +70,7 @@ function createGasMocks(prefetched) {
           const m = /"([^"]*)"/.exec(query || '');
           const name = m ? m[1] : '';
           const knownFiles = {
-            'region-index.json': path.join(REPO_ROOT, 'region-index.json')
+            'region-index.json': INDEX_PATH
           };
           const p = knownFiles[name];
           let used = !p || !fs.existsSync(p);
@@ -84,7 +92,7 @@ function createGasMocks(prefetched) {
     openById(_id) {
       return {
         getSheetByName(_name) {
-          const csvPath = path.join(REPO_ROOT, 'points.csv');
+          const csvPath = path.join(REPO_ROOT, 'data', 'points.csv');
           if (!fs.existsSync(csvPath)) return null;
           const rows = parseCsv(fs.readFileSync(csvPath, 'utf8'));
           return { getDataRange: () => ({ getValues: () => rows }) };

@@ -11,7 +11,8 @@ def analyze_region_index():
     """region-index.json の構造と北海道・沖縄の状況を分析"""
     
     # ファイル読み込み
-    index_path = Path("GAS/region-index.json")
+    # GASの admin_buildRegionIndex が生成し、Driveから落としてきたものを _work/ に置いて使う
+    index_path = Path(__file__).resolve().parent.parent / "_work" / "region-index.json"
     if not index_path.exists():
         print(f"❌ {index_path} が見つかりません")
         return

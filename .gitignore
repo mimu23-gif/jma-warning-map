@@ -1,21 +1,9 @@
-# 対応表インデックス（DriveのファイルIDを多数含むため非公開。実行時はDriveから読み込む）
-/region-index.json
-
-# 気象庁から取得した生データの巨大ダンプ（再取得可能・GitHubの単一ファイル100MB上限を超える）
-/1saibun.json
-/areas_warning.json
-/matome.json
-/municipalities_warning.json
-
-# 古い試作・作業フォルダ
-/old/
-/GEODATA/
-
-# 気象庁の公式PDF/Excel資料（再配布せず、READMEからリンクする）
-/参考資料/
-
-# 旧UIモック（MAP.htmlに統合済み・未使用）
-/doctype.html
+# 作業用フォルダ（リポジトリに含めないものを一括で置く）
+#  - 気象庁から取得した生データの巨大ダンプ（再取得可能・GitHubの単一ファイル100MB上限超）
+#  - GASが生成した region-index.json（多数のDrive ファイルIDを含む）
+#  - 境界データの変換元ZIP（gis_src/）、旧試作（old/, GEODATA/, doctype.html）
+#  - 気象庁の公式PDF/Excel資料（再配布せず、READMEからリンクする）
+/_work/
 
 # clasp のプロジェクト紐付け（scriptIdは利用者ごとに異なる。`clasp create`/`clasp clone`で再生成）
 /.clasp.json

@@ -73,21 +73,34 @@ namespace JmaMap
             return files;
         }
 
-        // ファイル数・総バイト数・最終更新時刻から署名を作る。キャッシュの有効判定に使う。
+        // ファイル数・総バイト数・最終更新時刻・全パスのハッシュから署名を作る。
+        // キャッシュには絶対パスが入るため、データフォルダを移動したときも必ず無効化されるよう
+        // パスそのものを署名に含める（数・サイズ・更新時刻は移動しても変わらない）。
         public static string ComputeSignature(List<string> files)
         {
             long total = 0;
             long maxTicks = 0;
+            ulong pathHash = 14695981039346656037UL;   // FNV-1a 64bit
             for (int i = 0; i < files.Count; i++)
             {
                 var fi = new FileInfo(files[i]);
                 total += fi.Length;
                 long t = fi.LastWriteTimeUtc.Ticks;
                 if (t > maxTicks) maxTicks = t;
+
+                string p = files[i];
+                for (int k = 0; k < p.Length; k++)
+                {
+                    pathHash ^= char.ToLowerInvariant(p[k]);
+                    pathHash *= 1099511628211UL;
+                }
+                pathHash ^= (ulong)'|';
+                pathHash *= 1099511628211UL;
             }
             return files.Count.ToString(CultureInfo.InvariantCulture) + "|"
                  + total.ToString(CultureInfo.InvariantCulture) + "|"
-                 + maxTicks.ToString(CultureInfo.InvariantCulture);
+                 + maxTicks.ToString(CultureInfo.InvariantCulture) + "|"
+                 + pathHash.ToString("x16", CultureInfo.InvariantCulture);
         }
 
         public static GeoIndex Build(List<string> files, Action<string> log)

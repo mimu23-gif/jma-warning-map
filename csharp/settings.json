@@ -3,8 +3,8 @@
   "portTries": 10,
   "browser": "default",
   "webDir": "web",
-  "dataDir": "..",
-  "pointsCsv": "../points.csv",
+  "dataDir": "../data/boundaries",
+  "pointsCsv": "../data/points.csv",
   "indexCache": "region-index-local.json",
   "geoCacheFiles": 8,
   "geoFolders": [

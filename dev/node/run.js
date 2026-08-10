@@ -28,7 +28,7 @@ async function main() {
   const context = vm.createContext(sandbox);
 
   for (const fname of ['Code.js', 'Points.js']) {
-    const src = fs.readFileSync(path.join(__dirname, '..', fname), 'utf8');
+    const src = fs.readFileSync(path.join(__dirname, '..', '..', 'gas', fname), 'utf8');
     vm.runInContext(src, context, { filename: fname });
   }
 

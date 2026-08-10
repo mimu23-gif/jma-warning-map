@@ -8,6 +8,8 @@
 
 本アプリが使う4区分と、ダウンロードするZIP・出力フォルダ・ファイル名サフィックスの対応:
 
+（出力先はいずれも data/boundaries/ 配下）
+
   一次細分区域等             : 20190125_AreaForecastLocalM_1saibun_GIS.zip      -> 1saibun/                        *_area.geojson
   府県予報区等               : 20190125_AreaForecastLocalM_prefecture_GIS.zip   -> hukenyohoukutou/                *_forecast.geojson
   市町村等をまとめた地域等   : 20230517_AreaForecastLocalM_matome_GIS.zip       -> sikutyousonnwomatometatiikitou/ *_region.geojson
@@ -22,12 +24,14 @@ GAS の admin_buildRegionIndex を実行すると region-index.json が生成さ
   pip install geopandas
 
 使い方:
-  # 4つのZIP（または展開後の .shp）を ./gis_src/ に置いて実行
-  python build_geojson_folders.py --src ./gis_src --out .
+  # 4つのZIP（または展開後の .shp）を _work/gis_src/ に置いて実行（既定値のまま実行すればよい）
+  python tools/build_geojson_folders.py
 """
 import argparse
 import sys
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 try:
     import geopandas as gpd
@@ -102,8 +106,10 @@ def detect_code_col(gdf):
 
 def main():
     ap = argparse.ArgumentParser(description="JMA予報区等GIS シェープ→GeoJSON＋都道府県分割")
-    ap.add_argument("--src", default="./gis_src", help="ダウンロードしたZIP/SHPを置いたディレクトリ")
-    ap.add_argument("--out", default=".", help="出力フォルダ群を作る基準ディレクトリ")
+    ap.add_argument("--src", default=str(REPO_ROOT / "_work" / "gis_src"),
+                    help="ダウンロードしたZIP/SHPを置いたディレクトリ")
+    ap.add_argument("--out", default=str(REPO_ROOT / "data" / "boundaries"),
+                    help="出力フォルダ群を作る基準ディレクトリ")
     args = ap.parse_args()
 
     src = Path(args.src)

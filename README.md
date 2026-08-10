@@ -3,21 +3,39 @@
 気象庁の特別警報・警報・注意報の発表状況と、任意の地点（POI）をひとつの地図上に重ねて表示する
 Google Apps Script（GAS）製の Web アプリです。
 
-![スクリーンショット](Screenshot/スクリーンショット%202026-06-28%20193024.png)
+![スクリーンショット](docs/screenshot.png)
 
 > GASを使わず **Windows標準機能だけ** で同じ画面を動かすC#移植版を [`csharp/`](csharp/) に同梱しています
 > （インストール・管理者権限・追加ランタイム不要）。→ [C#移植版](#c移植版windows標準機能のみgas不要)
 
-## 構成
+## ディレクトリ構成
+
+```
+├─ gas/       Apps Script 本体（clasp の rootDir）
+├─ csharp/    C#移植版（Windows標準機能のみで動く・GAS不要）
+├─ data/
+│   ├─ boundaries/   警報エリアの境界GeoJSON（4区分・188ファイル・約193MB）
+│   ├─ points.csv    POI（任意地点）のサンプルデータ
+│   └─ regioncode/   地域コード対応表（ローカル集計スクリプトの出力）
+├─ tools/     境界データの変換・集計スクリプト（Python）
+├─ dev/
+│   ├─ node/         GAS APIのモック（Node.jsだけでロジックを検証する）
+│   ├─ gas-debug/    調査用のGASスニペット（clasp の push 対象外）
+│   └─ samples/      調査時に保存した警報データのスナップショット
+├─ docs/      スクリーンショット等
+└─ _work/     作業用。巨大な生データ・旧試作・気象庁のPDF資料など（Git管理外）
+```
+
+### Apps Script 本体（`gas/`）
 
 | ファイル | 役割 |
 |---|---|
-| [appsscript.json](appsscript.json) | GASプロジェクトのマニフェスト |
-| [Code.js](Code.js) | `doGet()` エントリーポイント／気象庁 `r8/map.json` フィードから現況警報を集約し、GeoJSON境界と結合して返す |
-| [Points.js](Points.js) | Googleスプレッドシートから任意地点（POI）データを読み込み、種別ごとにグルーピングして返す |
-| [Message_acquisition.js](Message_acquisition.js) | 警報データ取得に関する補助ロジック |
-| [MAP.html](MAP.html) | フロントエンド（Leaflet地図・フィルタUI） |
-| [debug_area_json_fallback.js](debug_area_json_fallback.js) | 気象庁 `area.json` 周りのデバッグ用関数 |
+| [gas/appsscript.json](gas/appsscript.json) | GASプロジェクトのマニフェスト |
+| [gas/Code.js](gas/Code.js) | `doGet()` エントリーポイント／気象庁 `r8/map.json` フィードから現況警報を集約し、GeoJSON境界と結合して返す |
+| [gas/Points.js](gas/Points.js) | Googleスプレッドシートから任意地点（POI）データを読み込み、種別ごとにグルーピングして返す |
+| [gas/Message_acquisition.js](gas/Message_acquisition.js) | 警報データ取得に関する補助ロジック |
+| [gas/MAP.html](gas/MAP.html) | フロントエンド（Leaflet地図・フィルタUI） |
+| [gas/debug_area_json_fallback.js](gas/debug_area_json_fallback.js) | 気象庁 `area.json` 周りのデバッグ用関数 |
 
 ブラウザからアクセスすると `MAP.html` が返され、クライアント側から
 `google.script.run` 経由で `getActiveWarningFeatures()` / `getPoints()` などを呼び出します。
@@ -42,7 +60,7 @@ Google Apps Script（GAS）製の Web アプリです。
 **Python等のローカル環境が用意できなくても使えるよう、変換・分割済みのGeoJSONをリポジトリに同梱しています**
 （4フォルダ・合計約193MB・単一ファイル最大約6MB）。本アプリが使う4区分と元データの対応:
 
-| 同梱フォルダ | 気象庁GISの区分 | 元データ（更新時のダウンロード元ZIP） |
+| 同梱フォルダ（`data/boundaries/` 配下） | 気象庁GISの区分 | 元データ（更新時のダウンロード元ZIP） |
 |---|---|---|
 | `1saibun/` | 一次細分区域等 | `20190125_AreaForecastLocalM_1saibun_GIS.zip` |
 | `hukenyohoukutou/` | 府県予報区等 | `20190125_AreaForecastLocalM_prefecture_GIS.zip` |
@@ -51,18 +69,18 @@ Google Apps Script（GAS）製の Web アプリです。
 
 #### 使い方（クローン後・Python不要）
 
-1. 同梱の4フォルダ（`1saibun/` 等）を Google Drive の `AREA_GEO_PARENT_ID` フォルダ配下にアップロード
+1. [data/boundaries/](data/boundaries/) の4フォルダを Google Drive の `AREA_GEO_PARENT_ID` フォルダ配下にアップロード
 2. GASの `admin_buildRegionIndex` を実行して `region-index.json` を生成（[正規化パイプライン](#正規化パイプライン)参照）
 
 #### データを更新する場合（気象庁の最新版へ差し替え・geopandasが必要）
 
 同梱データは特定時点のスナップショットです。最新の境界に更新したいときだけ、元データから再生成します。
 
-1. 上表のZIPを[配布ページ](https://www.data.jma.go.jp/developer/gis.html)からダウンロードし `gis_src/` に置く（`.zip` のままで可）
-2. シェープ → GeoJSON 変換＋都道府県分割（[build_geojson_folders.py](build_geojson_folders.py)）:
+1. 上表のZIPを[配布ページ](https://www.data.jma.go.jp/developer/gis.html)からダウンロードし `_work/gis_src/` に置く（`.zip` のままで可）
+2. シェープ → GeoJSON 変換＋都道府県分割（[tools/build_geojson_folders.py](tools/build_geojson_folders.py)）:
    ```
    pip install geopandas
-   python build_geojson_folders.py --src ./gis_src --out .
+   python tools/build_geojson_folders.py
    ```
    → 4フォルダの `<都道府県コード>_<英名>_<種別>.geojson`（例: `10_gunma_area.geojson`）が再生成されます。
 
@@ -94,7 +112,7 @@ Google Apps Script（GAS）製の Web アプリです。
 #### 推奨：GASで完結（`admin_buildRegionIndex`）
 
 `AREA_GEO_PARENT_ID` 配下のGeoJSONをDrive上で走査して `region-index.json` を生成し、
-同じフォルダへ書き戻す管理関数を [Code.js](Code.js) に用意しています。Apps Scriptエディタで
+同じフォルダへ書き戻す管理関数を [gas/Code.js](gas/Code.js) に用意しています。Apps Scriptエディタで
 `admin_buildRegionIndex` を実行するだけで再生成でき、ローカル処理は不要です（実行は所有者のみ）。
 
 ```js
@@ -117,17 +135,19 @@ admin_buildRegionIndex();
 Drive権限が無い環境向けに、ローカルのGeoJSONを集計する補助スクリプトも同梱しています
 （ファイルパスベースの対応表のみを出力し、Drive ファイルIDは付与しません）。
 
-1. [build_regioncode_index.py](build_regioncode_index.py)
-   `1saibun/` `hukenyohoukutou/` `sikutyousonnwomatometatiikitou/` `sityousontou/` 配下の
-   `*.geojson` を走査し、各フィーチャの `properties.regioncode`（または `code`）を集計して
-   `taiouhyou/index_regioncode.json` / `.csv` を出力します。
-2. [analyze_region_index.py](analyze_region_index.py)
-   上記の集計結果を検証・分析するための補助スクリプトです。
+1. [tools/build_regioncode_index.py](tools/build_regioncode_index.py)
+   `data/boundaries/` 配下4フォルダの `*.geojson` を走査し、各フィーチャの
+   `properties.regioncode`（または `code`）を集計して
+   `data/regioncode/index_regioncode.json` / `.csv` を出力します。
+2. [tools/analyze_region_index.py](tools/analyze_region_index.py)
+   `_work/region-index.json` を読み、構造や地域ごとの内訳を検証・分析する補助スクリプトです。
+
+いずれもリポジトリのどこから実行してもよく、パスはスクリプト自身の位置から解決します。
 
 ### POI（任意地点）データ
 
 Googleスプレッドシートの1シートを `name,type1,type2,type3,address,lat,lng` 列構成で読み込みます
-（[Points.js](Points.js) の `POINTS_CFG` / `POINTS_HEADER_ALIASES` 参照）。
+（[gas/Points.js](gas/Points.js) の `POINTS_CFG` / `POINTS_HEADER_ALIASES` 参照）。
 `type1`〜`type3` 列のヘッダー文字列はそのままUIのフィルタ見出しとして表示されます。
 
 ## 初期設定（Script Properties）
@@ -156,20 +176,23 @@ admin_setPointsSpreadsheetId('あなたのスプレッドシートID');
 GAS環境を使わずにNode.jsだけでロジックを検証できるよう、簡易モック環境を用意しています。
 
 ```
-node local/server.js
+node dev/node/server.js     # ブラウザで http://localhost:8787/ を開く
+node dev/node/run.js        # 画面を出さずに集計結果だけ確認する
 ```
 
-[local/gas-mocks.js](local/gas-mocks.js) が `UrlFetchApp` / `DriveApp` / `SpreadsheetApp` /
-`CacheService` / `PropertiesService` をローカルファイル（`region-index.json` や `points.csv` など）で
-再現し、[local/server.js](local/server.js) がポート8787でHTTPサーバーとして起動します。
-POIデータはリポジトリ内の [points.csv](points.csv) をスプレッドシート代わりに使用します。
+[dev/node/gas-mocks.js](dev/node/gas-mocks.js) が `UrlFetchApp` / `DriveApp` / `SpreadsheetApp` /
+`CacheService` / `PropertiesService` をローカルファイルで再現し、
+[dev/node/server.js](dev/node/server.js) がポート8787でHTTPサーバーとして起動します。
+境界GeoJSONは [data/boundaries/](data/boundaries/)、POIデータは [data/points.csv](data/points.csv) を
+スプレッドシート代わりに使用します。
 
-※ `region-index.json` はリポジトリに含まれないため、ローカルモックで使う場合はルート直下に別途配置してください
-（GASの `admin_buildRegionIndex` で生成したものをDriveからダウンロードする等）。
+※ `region-index.json` はリポジトリに含まれないため、ローカルモックで使う場合は `_work/region-index.json`
+として配置してください（GASの `admin_buildRegionIndex` で生成したものをDriveからダウンロードする等）。
 
 ## デプロイ
 
-[clasp](https://github.com/google/clasp) でソースを同期します（`.claspignore` で対象ファイルを管理）。
+[clasp](https://github.com/google/clasp) でソースを同期します。push対象は [gas/](gas/) の中身だけなので、
+`.clasp.json` に **`"rootDir": "gas"`** を指定してください（`.claspignore` は不要です）。
 `.clasp.json`（紐づくApps ScriptプロジェクトのID）は利用者ごとに異なるためリポジトリには含めていません。
 初回は次のいずれかで自分のプロジェクトに紐付けてください。
 
@@ -197,7 +220,7 @@ Apps Scriptエディタの「デプロイを管理」から既存デプロイを
 - [csharp/build.bat](csharp/build.bat) をダブルクリック → `JmaMap.exe`（約43KB）が生成され、
   実行するとブラウザに地図が開き、タスクトレイに常駐します
 - インストール・管理者権限・ファイアウォール許可は不要（`localhost` に固定バインド）
-- 境界GeoJSONはこのリポジトリのフォルダを直接読み、POIは [points.csv](points.csv) を読みます
+- 境界GeoJSONは [data/boundaries/](data/boundaries/) を直接読み、POIは [data/points.csv](data/points.csv) を読みます
 - ソースはすべてプレーンテキストで、`.csproj` も `.ico` も使わない（メモ帳だけで編集・ビルドできる）構成です
 
 | GAS版 | C#移植版 |
@@ -205,7 +228,7 @@ Apps Scriptエディタの「デプロイを管理」から既存デプロイを
 | `doGet()` / `HtmlService` | `HttpListener` が `web/map.html` を返す |
 | `google.script.run` | `fetch()` |
 | `DriveApp` + `region-index.json`（DriveファイルID） | ローカルフォルダの直読み（起動時に索引を構築・キャッシュ） |
-| `SpreadsheetApp` | `points.csv` |
+| `SpreadsheetApp` | `data/points.csv` |
 | `CacheService`（95KB上限） | メモリ上のキャッシュ |
 | `PropertiesService` | [csharp/settings.json](csharp/settings.json) |
 
@@ -221,7 +244,7 @@ Apps Scriptエディタの「デプロイを管理」から既存デプロイを
 ただし `csharp/web/leaflet.js` / `csharp/web/leaflet.css` は同梱した
 [Leaflet](https://leafletjs.com/) 1.9.4（BSD-2-Clause）であり、同ライブラリのライセンスに従います。
 
-ただし、同梱の境界GeoJSON（`1saibun/` ほか）および実行時に表示する警報・注意報は**気象庁由来のデータ・情報**であり、
+ただし、同梱の境界GeoJSON（`data/boundaries/` 配下）および実行時に表示する警報・注意報は**気象庁由来のデータ・情報**であり、
 MITは適用されません。これらの利用は[気象庁ホームページの利用規約](https://www.jma.go.jp/jma/kishou/info/coment.html)
 （公共データ利用規約 第1.0版準拠）に従い、**出典の明記**と**加工した旨の明記**が必要です
 （詳細は本文「データの出典・ライセンス」を参照）。
