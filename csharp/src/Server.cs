@@ -366,6 +366,22 @@ namespace JmaMap
             var byFile = new Dictionary<string, List<Pending>>(StringComparer.OrdinalIgnoreCase);
             var unresolved = new List<string[]>();
 
+            // いま全国で発表されている現象コードとレベルを、絞り込みをかける前に集めておく。
+            // 画面のフィルタはこれを使って「発表されていない種別」を隠す。
+            var availableCodes = new List<string>();
+            var availableLevels = new List<string>();
+            for (int i = 0; i < items.Count; i++)
+            {
+                WarnItem it = items[i];
+                if (!availableLevels.Contains(it.Level)) availableLevels.Add(it.Level);
+                if (it.Codes == null) continue;
+                for (int c = 0; c < it.Codes.Count; c++)
+                {
+                    if (!availableCodes.Contains(it.Codes[c])) availableCodes.Add(it.Codes[c]);
+                }
+            }
+            availableCodes.Sort(StringComparer.Ordinal);
+
             for (int i = 0; i < items.Count; i++)
             {
                 WarnItem it = items[i];
@@ -467,7 +483,11 @@ namespace JmaMap
                 w.Write(Json.Quote(unresolved[i][1]));
                 w.Write('}');
             }
-            w.Write("],\"updatedAt\":");
+            w.Write("],\"available\":{\"levels\":");
+            WriteStrArray(w, availableLevels);
+            w.Write(",\"codes\":");
+            WriteStrArray(w, availableCodes);
+            w.Write("},\"updatedAt\":");
             w.Write(Json.Quote(updatedAt));
             w.Write('}');
         }
