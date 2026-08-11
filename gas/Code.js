@@ -400,8 +400,8 @@ function debug_get_from_config() {
 
 // 公開API：MAP.html から呼ぶ
 function getActiveWarningFeatures(args = {}) {
-  const { items } = getActiveWarnings(args);           // Message_acquisition 準拠の収集
-  if (!items || !items.length) return emptyFCWithMeta_();
+  const { items, available } = getActiveWarnings(args); // Message_acquisition 準拠の収集
+  if (!items || !items.length) return emptyFCWithMeta_(available);
 
   const index = loadRegionIndex_();
   const { class20sParent } = getAreaHierarchyMaps_();
@@ -477,6 +477,7 @@ function getActiveWarningFeatures(args = {}) {
     type: 'FeatureCollection',
     features: featuresOut,
     unresolved,             // [{code, reason}]
+    available,              // {levels, codes} 発表中の種別（絞り込み前）
     updatedAt: new Date().toISOString()
   };
 }
@@ -569,10 +570,19 @@ function getActiveWarnings(args = {}) {
     }
   }
 
+  // 画面のフィルタ表示用に、絞り込みをかける前の「いま発表中の現象・レベル」を集める。
+  // 絞り込み後の結果から求めると「利用者が外した種別」と「発表がない種別」を区別できない。
+  const availableCodes = new Set();
+  const availableLevels = new Set();
+
   const items = [];
   for (const [regionCode, codeSet] of byArea.entries()) {
     const codes = Array.from(codeSet);
     const level = highestLevel_(codes);
+
+    availableLevels.add(level);
+    for (const c of codes) availableCodes.add(c);
+
     if (levelsFilter && !levelsFilter.has(level)) continue;
     if (phenomFilter && !codes.some(c => phenomFilter.has(c))) continue;
 
@@ -585,7 +595,11 @@ function getActiveWarnings(args = {}) {
     });
   }
 
-  return { items };
+  const available = {
+    levels: Array.from(availableLevels),
+    codes: Array.from(availableCodes).sort()
+  };
+  return { items, available };
 }
 
 /** GeoJSONファイルを5分キャッシュして返す */
@@ -618,8 +632,14 @@ function normalizeR06Code_(v) {
   return ('0' + s).slice(-2);
 }
 
-function emptyFCWithMeta_() {
-  return { type: 'FeatureCollection', features: [], unresolved: [], updatedAt: new Date().toISOString() };
+function emptyFCWithMeta_(available) {
+  return {
+    type: 'FeatureCollection',
+    features: [],
+    unresolved: [],
+    available: available || { levels: [], codes: [] },
+    updatedAt: new Date().toISOString()
+  };
 }
 
 /** URLからJSONを安全に取得 */

@@ -4,19 +4,84 @@ const path = require('path');
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
 const BOUNDARY_DIR = path.join(REPO_ROOT, 'data', 'boundaries');
-// GASの admin_buildRegionIndex が生成したものをDriveから落として置く場所（gitignore対象）
-const INDEX_PATH = path.join(REPO_ROOT, '_work', 'region-index.json');
+const INDEX_CACHE = path.join(REPO_ROOT, '_work', 'region-index-mock.json');
 
-/** region-index.json の raw/norm6 から fileId -> ローカルパス の対応表を作る */
-function buildFileIdMap() {
-  const idx = JSON.parse(fs.readFileSync(INDEX_PATH, 'utf8'));
+/**
+ * data/boundaries/ を走査して region-index.json 相当を組み立てる。
+ * GASの admin_buildRegionIndex と同じ構造（raw / norm6）を作り、Drive ファイルIDの代わりに
+ * 「フォルダ名/ファイル名」を識別子として使う。
+ *
+ * Driveで生成した region-index.json をわざわざ持ってこなくてもモックが動くようにするため。
+ * 境界データを作り直したときに索引が古いままになる事故も防げる。
+ */
+function buildRegionIndex() {
+  const folders = fs.existsSync(BOUNDARY_DIR)
+    ? fs.readdirSync(BOUNDARY_DIR).filter(d => fs.statSync(path.join(BOUNDARY_DIR, d)).isDirectory())
+    : [];
+
+  const files = [];
+  for (const folder of folders.sort()) {
+    const dir = path.join(BOUNDARY_DIR, folder);
+    for (const name of fs.readdirSync(dir).sort()) {
+      if (!name.endsWith('.geojson')) continue;
+      files.push({ folder, name, full: path.join(dir, name) });
+    }
+  }
+
+  // 中身が変わっていなければ前回の結果を使う（毎回126MB走査すると遅いため）
+  const signature = files
+    .map(f => { const st = fs.statSync(f.full); return f.folder + '/' + f.name + ':' + st.size + ':' + st.mtimeMs; })
+    .join('|');
+  if (fs.existsSync(INDEX_CACHE)) {
+    try {
+      const cached = JSON.parse(fs.readFileSync(INDEX_CACHE, 'utf8'));
+      if (cached.signature === signature) return cached.index;
+    } catch (_) { /* 壊れていたら作り直す */ }
+  }
+
+  const raw = {};
+  const norm6 = {};
+  for (const f of files) {
+    const text = fs.readFileSync(f.full, 'utf8');
+    const id = f.folder + '/' + f.name;
+    const meta = { f: f.folder, i: id, n: f.name, l: f.folder };
+
+    // 全体をJSON.parseすると重いので、properties のコードだけを拾う
+    let re = /"regioncode"\s*:\s*"([^"]*)"/g;
+    let codes = [];
+    let m;
+    while ((m = re.exec(text)) !== null) codes.push(m[1]);
+    if (codes.length === 0) {
+      re = /"code"\s*:\s*"([^"]*)"/g;
+      while ((m = re.exec(text)) !== null) codes.push(m[1]);
+    }
+
+    for (const code of codes) {
+      if (!code) continue;
+      if (!raw[code]) raw[code] = meta;
+      const digits = String(code).replace(/\D/g, '');
+      if (digits.length !== 6 && digits.length !== 7) continue;
+      const key6 = digits.length === 7 ? digits.slice(0, 6) : digits;
+      if (!norm6[key6]) norm6[key6] = { f: meta.f, i: meta.i, n: meta.n, l: meta.l, r: code, t: 'any' };
+    }
+  }
+
+  const index = { version: '2', updatedAt: new Date().toISOString(), folders: {}, raw, norm6 };
+  try {
+    fs.mkdirSync(path.dirname(INDEX_CACHE), { recursive: true });
+    fs.writeFileSync(INDEX_CACHE, JSON.stringify({ signature, index }), 'utf8');
+  } catch (_) { /* 書けなくても動作には影響しない */ }
+  return index;
+}
+
+/** fileId（= フォルダ名/ファイル名）-> ローカルパス の対応表 */
+function buildFileIdMap(index) {
   const map = new Map();
   for (const dictName of ['raw', 'norm6']) {
-    const dict = idx[dictName] || {};
+    const dict = index[dictName] || {};
     for (const key of Object.keys(dict)) {
       const entry = dict[key];
       if (!entry || !entry.i || map.has(entry.i)) continue;
-      // entry.l はDrive上のフォルダ名（1saibun 等）。ローカルでは data/boundaries/ 配下に対応する。
       map.set(entry.i, path.join(BOUNDARY_DIR, entry.l, entry.n));
     }
   }
@@ -33,7 +98,9 @@ function makeBlob(text) {
  * @param {Map<string,{status:number, body:string}>} prefetched URL -> レスポンス
  */
 function createGasMocks(prefetched) {
-  const fileIdMap = buildFileIdMap();
+  const regionIndex = buildRegionIndex();
+  const regionIndexJson = JSON.stringify(regionIndex);
+  const fileIdMap = buildFileIdMap(regionIndex);
   const cacheStore = new Map();
   const propsStore = new Map();
 
@@ -66,19 +133,16 @@ function createGasMocks(prefetched) {
       return {
         searchFiles(query) {
           // findFileInFolderByName_ は `title = "name"` 等の形でクエリを渡すため、
-          // クォート内の文字列だけを取り出してローカルファイルへマッピングする。
+          // クォート内の文字列だけを取り出して判定する。
+          // region-index.json はローカルの境界データから組み立てたものを返す。
           const m = /"([^"]*)"/.exec(query || '');
           const name = m ? m[1] : '';
-          const knownFiles = {
-            'region-index.json': INDEX_PATH
-          };
-          const p = knownFiles[name];
-          let used = !p || !fs.existsSync(p);
+          let used = (name !== 'region-index.json');
           return {
             hasNext: () => !used,
             next: () => {
               used = true;
-              return { getBlob: () => makeBlob(fs.readFileSync(p, 'utf8')) };
+              return { getBlob: () => makeBlob(regionIndexJson) };
             }
           };
         }
@@ -156,4 +220,4 @@ function parseCsv(text) {
   return rows;
 }
 
-module.exports = { createGasMocks, buildFileIdMap };
+module.exports = { createGasMocks, buildRegionIndex, buildFileIdMap };

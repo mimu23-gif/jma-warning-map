@@ -61,6 +61,12 @@
     /* Loading state on button */
     .chip[disabled] { opacity: 0.6; cursor: not-allowed; }
 
+    /* 発表されていない種別は隠す（「他 n 種別」を押すと出る） */
+    #phenomena:not(.show-all) .chip[data-available="false"],
+    #levelChips:not(.show-all) .chip[data-available="false"] { display: none; }
+    .chip[data-available="false"] { opacity: .55; }
+    .chip.ghost { background: transparent; border-style: dashed; color: var(--muted); margin-top: 6px; }
+
     /* 地点ラベル（ある程度ズームしたときだけ表示） */
     .point-label { background: rgba(11,16,32,.85); border: 1px solid #2a3868; color: #eaeef9; font-size: 11px; padding: 1px 6px; border-radius: 6px; box-shadow: none; }
     .point-label::before { display: none; }
@@ -353,15 +359,82 @@ document.querySelectorAll('#phenomena .chip').forEach(ch => {
   });
 });
 
-// 一括選択/解除
+// 一括選択/解除（発表されていない種別は選択対象にしない）
 function setAllChips(containerSelector, active) {
   const chips = document.querySelectorAll(containerSelector + ' .chip');
   chips.forEach(ch => {
+    if (active && ch.dataset.available === 'false') return;
     const input = ch.querySelector('input');
     if (input) input.checked = !!active;
     ch.dataset.active = String(!!active);
   });
   applyFiltersClientSide();
+}
+
+// ================================
+// 2.5) いま発表中の種別だけを出す
+// ================================
+// サーバ（getActiveWarnings）は絞り込み前の全国の警報から「発表中の現象コード・レベル」を
+// available として返す。それに含まれない種別のチップは既定で隠し、フィルタからも外す。
+function markAvailability(container, isAvailable) {
+  container.querySelectorAll('.chip').forEach(ch => {
+    const ok = !!isAvailable(ch);
+    const was = ch.dataset.available;
+    ch.dataset.available = String(ok);
+    const input = ch.querySelector('input');
+    if (!ok) {
+      if (input) input.checked = false;
+      ch.dataset.active = 'false';
+    } else if (was === 'false') {
+      // 発表が始まった種別は自動で選択に戻す（前回隠したまま埋もれるのを防ぐ）
+      if (input) input.checked = true;
+      ch.dataset.active = 'true';
+    }
+  });
+}
+
+function ensureHiddenToggle(container, id) {
+  let el = document.getElementById(id);
+  if (!el) {
+    el = document.createElement('button');
+    el.id = id;
+    el.className = 'chip ghost';
+    el.addEventListener('click', () => {
+      container.classList.toggle('show-all');
+      updateHiddenToggle(container, el);
+    });
+    container.parentNode.insertBefore(el, container.nextSibling);
+  }
+  return el;
+}
+
+function updateHiddenToggle(container, el) {
+  const hidden = container.querySelectorAll('.chip[data-available="false"]').length;
+  if (hidden === 0) {
+    el.style.display = 'none';
+    container.classList.remove('show-all');
+    return;
+  }
+  el.style.display = '';
+  el.textContent = container.classList.contains('show-all')
+    ? `発表中のみ表示（他 ${hidden} 種別を隠す）`
+    : `他 ${hidden} 種別（発表なし）も表示`;
+}
+
+function applyAvailability(avail) {
+  const phenomBox = document.getElementById('phenomena');
+  if (avail) {
+    const codes = new Set((avail.codes || []).map(String));
+    const levels = new Set(avail.levels || []);
+    markAvailability(phenomBox, ch => (PHENOM_MAP[ch.dataset.phenom] || []).some(c => codes.has(c)));
+    markAvailability(levelChips, ch => levels.has(ch.dataset.level));
+  } else {
+    // 情報が無い状態（初期表示・リセット後）は全種別を出す
+    markAvailability(phenomBox, () => true);
+    markAvailability(levelChips, () => true);
+  }
+  updateHiddenToggle(phenomBox, ensureHiddenToggle(phenomBox, 'phenomHiddenToggle'));
+  updateHiddenToggle(levelChips, ensureHiddenToggle(levelChips, 'levelHiddenToggle'));
 }
 
 document.getElementById('btnLevelAll').addEventListener('click', () => setAllChips('#levelChips', true));
@@ -553,8 +626,10 @@ document.getElementById('btnFetch').addEventListener('click', () => {
       } else {
         unresolved.removeAttribute('title');
       }
+      applyAvailability(res && res.available);
       document.getElementById('lastUpdate').querySelector('span:last-child').textContent = '最終更新: ' + new Date().toLocaleTimeString();
-      showToast(`取得: ${fc.features.length}件 / 未解決: ${unresolved.textContent}`);
+      const kinds = (res && res.available && res.available.codes) ? res.available.codes.length : 0;
+      showToast(`取得: ${fc.features.length}件 / 発表中 ${kinds} 現象 / 未解決: ${unresolved.textContent}`);
       applyFiltersClientSide();
     })
     .withFailureHandler(err => {
@@ -571,7 +646,8 @@ document.getElementById('btnReset').addEventListener('click', () => {
   unresolved.textContent = '0';
   document.getElementById('sel').textContent = '0';
   map.setView([36.3, 137.9], 5);
-  // フィルタ初期化（全選択状態へ戻す）
+  // フィルタ初期化（隠していた種別も戻してから全選択）
+  applyAvailability(null);
   setAllChips('#levelChips', true);
   setAllChips('#phenomena', true);
   setAllPointChips(true);
