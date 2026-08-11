@@ -33,6 +33,7 @@ namespace JmaMap.Tools
                 if (cmd == "merge") return CmdMerge(args);
                 if (cmd == "shp2geojson") return CmdShp2GeoJson(args, tempDirs);
                 if (cmd == "convert") return CmdConvert(args, tempDirs);
+                if (cmd == "simplify") return CmdSimplify(args);
                 Console.Error.WriteLine("不明なコマンド: " + args[0]);
                 Usage();
                 return 1;
@@ -59,11 +60,13 @@ namespace JmaMap.Tools
             Console.WriteLine("  GeoTool.exe shp2geojson --in <ZIP|SHP> --out <全国版.geojson> [--encoding cp932] [--layer 名前の一部]");
             Console.WriteLine("  GeoTool.exe split       --in <全国版.geojson> --out <出力フォルダ> [--suffix area]");
             Console.WriteLine("  GeoTool.exe merge       --in <都道府県別フォルダ> --out <全国版.geojson>");
+            Console.WriteLine("  GeoTool.exe simplify    --in <フォルダ|ファイル> --out <同> --tolerance 0.001");
             Console.WriteLine();
             Console.WriteLine("  convert     : ZIP/シェープファイルから都道府県別GeoJSONまで一気に作る");
             Console.WriteLine("  shp2geojson : シェープファイルを全国版GeoJSON 1ファイルへ変換する");
             Console.WriteLine("  split       : 全国版を地域コード先頭2桁で都道府県別へ分割する");
             Console.WriteLine("  merge       : 都道府県別を1つに連結する（検証用）");
+            Console.WriteLine("  simplify    : 表示用に頂点を間引く（Douglas-Peucker）。--tolerance は度で指定（1e-4≒11m）");
             Console.WriteLine();
             Console.WriteLine("  座標変換は行わない。気象庁の予報区等GISはJGD2011の地理座標で、WGS84と同等のため");
             Console.WriteLine("  そのままEPSG:4326として出力する。投影座標系(PROJCS)の入力は受け付けない。");
@@ -314,6 +317,84 @@ namespace JmaMap.Tools
                 return;
             }
             Json.AppendString(sb, v.ToString());
+        }
+
+        /*** simplify（表示用の間引き） ***/
+
+        static int CmdSimplify(string[] args)
+        {
+            string input = GetArg(args, "--in");
+            string output = GetArg(args, "--out");
+            string tolText = GetArg(args, "--tolerance");
+            if (input == null || output == null || tolText == null)
+            {
+                Console.Error.WriteLine("--in / --out / --tolerance が必要です");
+                Usage();
+                return 1;
+            }
+            double tolerance;
+            if (!double.TryParse(tolText, NumberStyles.Float, CultureInfo.InvariantCulture, out tolerance) || tolerance <= 0)
+                throw new ArgumentException("--tolerance は正の数（度）で指定してください: " + tolText);
+
+            var files = new List<string>();
+            bool isDir = Directory.Exists(input);
+            if (isDir)
+            {
+                files.AddRange(Directory.GetFiles(input, "*.geojson", SearchOption.TopDirectoryOnly));
+                files.Sort(StringComparer.OrdinalIgnoreCase);
+                Directory.CreateDirectory(output);
+            }
+            else
+            {
+                if (!File.Exists(input)) throw new FileNotFoundException("入力がありません: " + input);
+                files.Add(input);
+                string parent = Path.GetDirectoryName(Path.GetFullPath(output));
+                if (!string.IsNullOrEmpty(parent)) Directory.CreateDirectory(parent);
+            }
+
+            long before = 0, after = 0, features = 0, dropped = 0;
+            long bytesIn = 0, bytesOut = 0;
+
+            for (int f = 0; f < files.Count; f++)
+            {
+                string src = files[f];
+                string dst = isDir ? Path.Combine(output, Path.GetFileName(src)) : output;
+                bytesIn += new FileInfo(src).Length;
+
+                using (var stream = new FeatureStream(src))
+                using (var w = new GeoJsonWriter(dst, Path.GetFileNameWithoutExtension(dst)))
+                {
+                    if (!stream.MoveToFeatures()) continue;
+                    string raw;
+                    while ((raw = stream.NextFeature()) != null)
+                    {
+                        features++;
+                        List<FeatureRef> refs = GeoJson.Scan(raw);
+                        if (refs.Count == 0 || !GeoJson.HasGeometry(refs[0])) { w.WriteFeature(raw); continue; }
+
+                        FeatureRef fr = refs[0];
+                        string geom = raw.Substring(fr.GeomStart, fr.GeomEnd - fr.GeomStart);
+                        string simplified = Simplify.Geometry(geom, tolerance, ref before, ref after);
+                        if (simplified == "null") { dropped++; }
+                        w.WriteFeature(raw.Substring(0, fr.GeomStart) + simplified + raw.Substring(fr.GeomEnd));
+                    }
+                }
+                bytesOut += new FileInfo(dst).Length;
+            }
+
+            double reduction = (before > 0) ? (100.0 * (1.0 - (double)after / before)) : 0;
+            Console.WriteLine("許容誤差: " + tolerance.ToString("R", CultureInfo.InvariantCulture)
+                + " 度（緯度換算で約 " + (tolerance * 111320).ToString("N0", CultureInfo.InvariantCulture) + " m）");
+            Console.WriteLine("対象: " + files.Count.ToString(CultureInfo.InvariantCulture) + " ファイル / "
+                + features.ToString(CultureInfo.InvariantCulture) + " フィーチャ");
+            Console.WriteLine("頂点: " + before.ToString("N0", CultureInfo.InvariantCulture) + " -> "
+                + after.ToString("N0", CultureInfo.InvariantCulture)
+                + "  削減 " + reduction.ToString("N2", CultureInfo.InvariantCulture) + " %");
+            Console.WriteLine("サイズ: " + (bytesIn / 1048576.0).ToString("N1", CultureInfo.InvariantCulture) + " MB -> "
+                + (bytesOut / 1048576.0).ToString("N1", CultureInfo.InvariantCulture) + " MB");
+            if (dropped > 0)
+                Console.WriteLine("ジオメトリが消えたフィーチャ: " + dropped.ToString(CultureInfo.InvariantCulture) + " 件（許容誤差が大きすぎます）");
+            return 0;
         }
 
         /*** merge（検証・再分割用） ***/

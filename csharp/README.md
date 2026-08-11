@@ -95,7 +95,37 @@ GeoTool.exe convert     --in <ZIP|SHP> --out <出力フォルダ> [--suffix area
 GeoTool.exe shp2geojson --in <ZIP|SHP> --out <全国版.geojson>
 GeoTool.exe split       --in <全国版.geojson> --out <出力フォルダ> [--suffix area]
 GeoTool.exe merge       --in <都道府県別フォルダ> --out <全国版.geojson>
+GeoTool.exe simplify    --in <フォルダ|ファイル> --out <同> --tolerance 0.0023
 ```
+
+### 同梱データの作り方（2段構え）
+
+原データは4区分で 1.88GB・4,502万頂点あり、そのまま配信するとブラウザが持ちません。
+**変換 → 簡略化** の2段で作ります。
+
+```
+:: 1) 気象庁ZIP -> 高精度な都道府県別GeoJSON（1.88GB）
+GeoTool.exe convert  --in ..\_work\gis_src\20230517_AreaForecastLocalM_matome_GIS.zip ^
+                     --out ..\_work\boundaries_full\sikutyousonnwomatometatiikitou
+
+:: 2) 表示用に間引く（14.4MB）
+GeoTool.exe simplify --in ..\_work\boundaries_full\sikutyousonnwomatometatiikitou ^
+                     --out ..\data\boundaries\sikutyousonnwomatometatiikitou ^
+                     --tolerance 0.0023
+```
+
+`--tolerance` は度で指定します（緯度1度 ≒ 111km なので 0.0023度 ≒ 256m）。同梱データはこの値です。
+
+| 許容誤差 | 削減率 | 全4区分の合計 | 用途 |
+|---|---|---|---|
+| 0.0001（約11m） | 約85% | 約150 MB | ズーム18でも輪郭が保たれる |
+| 0.001（約111m） | 約98% | 約30 MB | 中間 |
+| **0.0023（約256m）** | **99.3%** | **14.4 MB** | **同梱データ。全国表示〜市町村表示向け** |
+| 0.005（約557m） | 99.6% | 約8 MB | 全国表示専用 |
+
+簡略化の副作用: 境界線が許容誤差ぶんずれるほか、**3頂点未満に潰れたリング（小島・岩礁）は削除されます**
+（北海道の一次細分区域でポリゴン 9,435 → 157）。離島のPOIが警報エリア判定から外れる可能性があります。
+各ポリゴンを独立に簡略化するため、隣接区域の境界に隙間が生じることもあります。
 
 例（配布ZIPをそのまま渡せます。展開不要）:
 
