@@ -524,13 +524,32 @@ function showLoading(on) {
   }
 }
 
-document.getElementById('btnFetch').addEventListener('click', () => {
-  const args = gatherFilters();
+// ズーム段（サーバの設定と同じ表を /api/status から受け取る）。
+// 遠景は粗く間引いた軽い形状、近景は細かい形状をサーバが返す。
+let zoomTiers = null;
+let lastTolerance = null;
+let lastArgs = null;
+
+function toleranceForZoom(z) {
+  if (!zoomTiers) return null;
+  for (const [maxZoom, tol] of zoomTiers) {
+    if (z <= maxZoom) return tol;
+  }
+  return 0;
+}
+
+fetch('api/status')
+  .then(r => r.json())
+  .then(s => { if (s && Array.isArray(s.zoomTiers)) zoomTiers = s.zoomTiers; })
+  .catch(() => {});
+
+function fetchWarnings(args, fit) {
+  lastArgs = args;
   showLoading(true);
-  fetch('api/warnings', {
+  return fetch('api/warnings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(args)
+    body: JSON.stringify(Object.assign({}, args, { zoom: map.getZoom() }))
   })
     .then(r => {
       if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -542,7 +561,7 @@ document.getElementById('btnFetch').addEventListener('click', () => {
       const fc = (res && res.type === 'FeatureCollection') ? res : { type: 'FeatureCollection', features: [] };
       warnLayer.clearLayers();
       warnLayer.addData(fc);
-      fitToData();
+      if (fit) fitToData();   // ズーム変更に伴う取り直しでは表示位置を動かさない
       updateVisibleCount();
       drawn.textContent = fc.features.length;
       unresolved.textContent = (Array.isArray(res?.unresolved)) ? res.unresolved.length : 0;
@@ -556,8 +575,9 @@ document.getElementById('btnFetch').addEventListener('click', () => {
       } else {
         unresolved.removeAttribute('title');
       }
+      lastTolerance = toleranceForZoom(map.getZoom());
       document.getElementById('lastUpdate').querySelector('span:last-child').textContent = '最終更新: ' + new Date().toLocaleTimeString();
-      showToast(`取得: ${fc.features.length}件 / 未解決: ${unresolved.textContent}`);
+      if (fit) showToast(`取得: ${fc.features.length}件 / 未解決: ${unresolved.textContent}`);
       applyFiltersClientSide();
     })
     .catch(err => {
@@ -565,10 +585,29 @@ document.getElementById('btnFetch').addEventListener('click', () => {
       console.error(err);
       showToast('取得に失敗しました: ' + (err && err.message ? err.message : err));
     });
+}
+
+document.getElementById('btnFetch').addEventListener('click', () => {
+  fetchWarnings(gatherFilters(), true);
+});
+
+// ズームが別の段に入ったら、その縮尺に合った精度で取り直す。
+// 遠景では粗い形状で軽く、近景では細かい形状で正確に描ける。
+let refetchTimer = null;
+map.on('zoomend', () => {
+  if (!lastArgs || !zoomTiers) return;
+  const tol = toleranceForZoom(map.getZoom());
+  if (tol === lastTolerance) return;
+  if (refetchTimer) clearTimeout(refetchTimer);
+  refetchTimer = setTimeout(() => {
+    if (toleranceForZoom(map.getZoom()) !== lastTolerance) fetchWarnings(lastArgs, false);
+  }, 400);
 });
 
 document.getElementById('btnReset').addEventListener('click', () => {
   warnLayer.clearLayers();
+  lastArgs = null;          // 取り直しの対象が無くなるので自動再取得も止める
+  lastTolerance = null;
   drawn.textContent = '0';
   unresolved.textContent = '0';
   document.getElementById('sel').textContent = '0';

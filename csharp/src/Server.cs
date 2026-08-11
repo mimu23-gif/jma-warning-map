@@ -5,6 +5,7 @@ using System.IO;
 using System.Net;
 using System.Text;
 using System.Threading;
+using JmaMap.Tools;
 
 namespace JmaMap
 {
@@ -24,6 +25,11 @@ namespace JmaMap
         GeoIndex index;
         PointsData points;
         DateTime pointsStamp = DateTime.MinValue;
+
+        // 簡略化したジオメトリのキャッシュ。キーは「ファイル|geometryの位置|許容誤差」。
+        // 間引き後は元の数%まで小さくなるので、全ズーム段を載せてもメモリは知れている。
+        readonly Dictionary<string, string> simplifiedCache = new Dictionary<string, string>(StringComparer.Ordinal);
+        readonly object simplifyGate = new object();
 
         public int Port;
         public string BaseUrl = "";
@@ -194,6 +200,16 @@ namespace JmaMap
             var sb = new StringBuilder();
             sb.Append("{\"port\":").Append(Port.ToString(CultureInfo.InvariantCulture));
             sb.Append(",\"indexBuilt\":").Append(idx != null ? "true" : "false");
+
+            // クライアントはこの表を見て「ズームが変わったら取り直すか」を判断する
+            sb.Append(",\"zoomTiers\":[");
+            for (int i = 0; i < cfg.ZoomTolerances.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                sb.Append('[').Append(cfg.ZoomTolerances[i][0].ToString("R", CultureInfo.InvariantCulture));
+                sb.Append(',').Append(cfg.ZoomTolerances[i][1].ToString("R", CultureInfo.InvariantCulture)).Append(']');
+            }
+            sb.Append(']');
             if (idx != null)
             {
                 sb.Append(",\"files\":").Append(idx.FileCount.ToString(CultureInfo.InvariantCulture));
@@ -286,6 +302,7 @@ namespace JmaMap
         {
             HashSet<string> levels = null;
             HashSet<string> phenomena = null;
+            double zoom = -1;
 
             if (string.Equals(ctx.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
             {
@@ -299,14 +316,21 @@ namespace JmaMap
                     var args = Json.Obj(Json.Parse(body));
                     levels = ToSet(Json.Arr(Json.Get(args, "levels")));
                     phenomena = ToSet(Json.Arr(Json.Get(args, "phenomena")));
+
+                    object z = Json.Get(args, "zoom");
+                    if (z != null)
+                        double.TryParse(Json.Str(z), NumberStyles.Float, CultureInfo.InvariantCulture, out zoom);
                 }
             }
+
+            // ズーム未指定なら最も粗い段（全国表示相当）を使う
+            double tolerance = (zoom >= 0) ? cfg.ToleranceForZoom(zoom) : cfg.ToleranceForZoom(0);
 
             ctx.Response.ContentType = "application/json; charset=utf-8";
             ctx.Response.SendChunked = true;
             using (var w = new StreamWriter(ctx.Response.OutputStream, new UTF8Encoding(false)))
             {
-                WriteWarnings(w, levels, phenomena);
+                WriteWarnings(w, levels, phenomena, tolerance);
             }
         }
 
@@ -325,6 +349,15 @@ namespace JmaMap
         }
 
         public void WriteWarnings(TextWriter w, HashSet<string> levels, HashSet<string> phenomena)
+        {
+            WriteWarnings(w, levels, phenomena, 0);
+        }
+
+        /// <summary>
+        /// 現況警報をFeatureCollectionとして書き出す。
+        /// tolerance &gt; 0 なら、その許容誤差（度）でジオメトリを間引いてから送る。
+        /// </summary>
+        public void WriteWarnings(TextWriter w, HashSet<string> levels, HashSet<string> phenomena, double tolerance)
         {
             GeoIndex idx = GetIndex();
             List<WarnItem> items = Jma.GetActiveWarnings();
@@ -420,7 +453,7 @@ namespace JmaMap
 
                     if (!first) w.Write(',');
                     first = false;
-                    WriteFeature(w, gf, ft, p.Item, updatedAt);
+                    WriteFeature(w, GetGeometryJson(kv.Key, gf, ft, tolerance), ft, p.Item, updatedAt);
                 }
             }
 
@@ -439,7 +472,43 @@ namespace JmaMap
             w.Write('}');
         }
 
-        static void WriteFeature(TextWriter w, GeoFile gf, FeatureRef ft, WarnItem item, string updatedAt)
+        /// <summary>
+        /// 送信するジオメトリを返す。tolerance が 0 なら原文そのまま、そうでなければ
+        /// 間引いた結果をキャッシュから返す（同じズーム段の2回目以降は再計算しない）。
+        /// </summary>
+        string GetGeometryJson(string filePath, GeoFile gf, FeatureRef ft, double tolerance)
+        {
+            string raw = gf.Text.Substring(ft.GeomStart, ft.GeomEnd - ft.GeomStart);
+            if (tolerance <= 0) return raw;
+
+            string key = filePath + "|" + ft.GeomStart.ToString(CultureInfo.InvariantCulture)
+                       + "|" + tolerance.ToString("R", CultureInfo.InvariantCulture);
+            lock (simplifyGate)
+            {
+                string hit;
+                if (simplifiedCache.TryGetValue(key, out hit)) return hit;
+            }
+
+            long before = 0, after = 0;
+            string simplified;
+            try
+            {
+                simplified = Simplify.Geometry(raw, tolerance, ref before, ref after);
+            }
+            catch (Exception ex)
+            {
+                Trace("簡略化に失敗（原文を送ります）: " + ex.Message);
+                return raw;
+            }
+
+            lock (simplifyGate)
+            {
+                simplifiedCache[key] = simplified;
+            }
+            return simplified;
+        }
+
+        static void WriteFeature(TextWriter w, string geometryJson, FeatureRef ft, WarnItem item, string updatedAt)
         {
             w.Write("{\"type\":\"Feature\",\"properties\":{\"code\":");
             w.Write(Json.Quote(item.RegionCode));
@@ -454,8 +523,7 @@ namespace JmaMap
             w.Write(",\"updatedAt\":");
             w.Write(Json.Quote(updatedAt));
             w.Write("},\"geometry\":");
-            // 原文の geometry をそのまま流す（座標を数値へ起こさないので速い）
-            w.Write(gf.Text.Substring(ft.GeomStart, ft.GeomEnd - ft.GeomStart));
+            w.Write(geometryJson);
             w.Write('}');
         }
 

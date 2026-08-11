@@ -23,7 +23,10 @@ echo Building JmaMap.exe ...
   /r:System.Core.dll ^
   /r:System.Drawing.dll ^
   /r:System.Windows.Forms.dll ^
-  "%~dp0src\*.cs"
+  /r:System.Numerics.dll ^
+  "%~dp0src\*.cs" ^
+  "%~dp0geotool\Simplify.cs" ^
+  "%~dp0geotool\CoordWriter.cs"
 
 if errorlevel 1 (
   echo.

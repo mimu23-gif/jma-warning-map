@@ -7,6 +7,15 @@
   "pointsCsv": "../data/points.csv",
   "indexCache": "region-index-local.json",
   "geoCacheFiles": 8,
+  "_zoomTolerances": "[最大ズーム, 許容誤差(度)] の並び。遠景ほど大きく間引く。0 は同梱データそのまま",
+  "zoomTolerances": [
+    [5, 0.02],
+    [7, 0.008],
+    [9, 0.003],
+    [11, 0.001],
+    [13, 0.0005],
+    [99, 0]
+  ],
   "geoFolders": [
     "1saibun",
     "hukenyohoukutou",
