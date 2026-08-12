@@ -57,6 +57,31 @@ namespace JmaMap
             return null;
         }
 
+        /// <summary>
+        /// 市区町村全体のコード（末尾00）に対して、細分された区域を全部返す。
+        ///
+        /// 同梱の「市町村等」は気象警報用の区分で、八代市が「八代市西部(4320211)/東部(4320212)」の
+        /// ように割れていることがある。一方、震度・噴火警報・降灰予報は市全体(4320200)で届くため
+        /// 7桁一致も6桁一致も外れる。そこで先頭5桁が同じ細分区域を拾って、市全体を塗れるようにする。
+        /// 空振りは滅多に起きないので、その時だけの線形走査で足りる。
+        /// </summary>
+        public List<IndexEntry> FindSubdivisions(string code)
+        {
+            var result = new List<IndexEntry>();
+            if (string.IsNullOrEmpty(code) || code.Length != 7) return result;
+            if (!code.EndsWith("00", StringComparison.Ordinal)) return result;
+
+            string head5 = code.Substring(0, 5);
+            foreach (var kv in Raw)
+            {
+                if (kv.Key.Length != 7) continue;
+                if (kv.Key.EndsWith("00", StringComparison.Ordinal)) continue;
+                if (string.CompareOrdinal(kv.Key, 0, head5, 0, 5) != 0) continue;
+                result.Add(kv.Value);
+            }
+            return result;
+        }
+
         /*** 構築 ***/
 
         public static List<string> ListGeoFiles(List<string> folders)

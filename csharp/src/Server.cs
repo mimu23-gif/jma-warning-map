@@ -31,6 +31,10 @@ namespace JmaMap
         readonly Dictionary<string, string> simplifiedCache = new Dictionary<string, string>(StringComparer.Ordinal);
         readonly object simplifyGate = new object();
 
+        // フィーチャごとの外接矩形。ビューポート絞り込みの判定に使う。
+        readonly Dictionary<string, double[]> bboxCache = new Dictionary<string, double[]>(StringComparer.Ordinal);
+        readonly object bboxGate = new object();
+
         public int Port;
         public string BaseUrl = "";
         public Action<string> Log;
@@ -163,6 +167,36 @@ namespace JmaMap
             if (path == "/api/status")
             {
                 WriteText(ctx, "application/json; charset=utf-8", StatusJson());
+                return;
+            }
+            if (path == "/api/quake")
+            {
+                ServeQuakeList(ctx);
+                return;
+            }
+            if (path == "/api/quake/intensity")
+            {
+                ServeQuakeIntensity(ctx);
+                return;
+            }
+            if (path == "/api/typhoon")
+            {
+                ServeTyphoon(ctx);
+                return;
+            }
+            if (path == "/api/volcano")
+            {
+                ServeVolcano(ctx);
+                return;
+            }
+            if (path == "/api/flood")
+            {
+                ServeFlood(ctx);
+                return;
+            }
+            if (path == "/api/tsunami")
+            {
+                ServeTsunami(ctx);
                 return;
             }
             ctx.Response.StatusCode = 404;
@@ -303,6 +337,7 @@ namespace JmaMap
             HashSet<string> levels = null;
             HashSet<string> phenomena = null;
             double zoom = -1;
+            double[] view = null;
 
             if (string.Equals(ctx.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
             {
@@ -320,6 +355,8 @@ namespace JmaMap
                     object z = Json.Get(args, "zoom");
                     if (z != null)
                         double.TryParse(Json.Str(z), NumberStyles.Float, CultureInfo.InvariantCulture, out zoom);
+
+                    view = BBoxFromJson(Json.Arr(Json.Get(args, "bbox")));
                 }
             }
 
@@ -330,7 +367,7 @@ namespace JmaMap
             ctx.Response.SendChunked = true;
             using (var w = new StreamWriter(ctx.Response.OutputStream, new UTF8Encoding(false)))
             {
-                WriteWarnings(w, levels, phenomena, tolerance);
+                WriteWarnings(w, levels, phenomena, tolerance, view);
             }
         }
 
@@ -350,14 +387,21 @@ namespace JmaMap
 
         public void WriteWarnings(TextWriter w, HashSet<string> levels, HashSet<string> phenomena)
         {
-            WriteWarnings(w, levels, phenomena, 0);
+            WriteWarnings(w, levels, phenomena, 0, null);
+        }
+
+        public void WriteWarnings(TextWriter w, HashSet<string> levels, HashSet<string> phenomena, double tolerance)
+        {
+            WriteWarnings(w, levels, phenomena, tolerance, null);
         }
 
         /// <summary>
         /// 現況警報をFeatureCollectionとして書き出す。
         /// tolerance &gt; 0 なら、その許容誤差（度）でジオメトリを間引いてから送る。
+        /// view（[西,南,東,北]）を渡すと、そこに重ならないフィーチャは送らない。
         /// </summary>
-        public void WriteWarnings(TextWriter w, HashSet<string> levels, HashSet<string> phenomena, double tolerance)
+        public void WriteWarnings(TextWriter w, HashSet<string> levels, HashSet<string> phenomena,
+                                  double tolerance, double[] view)
         {
             GeoIndex idx = GetIndex();
             List<WarnItem> items = Jma.GetActiveWarnings();
@@ -466,6 +510,8 @@ namespace JmaMap
                         unresolved.Add(new string[] { p.Item.RegionCode, "FEATURE_NOT_FOUND" });
                         continue;
                     }
+                    // 画面外のエリアは送らない（未解決には数えない。表示範囲の都合で省いただけなので）
+                    if (OutsideView(kv.Key, gf, ft, view)) continue;
 
                     if (!first) w.Write(',');
                     first = false;
@@ -490,6 +536,117 @@ namespace JmaMap
             w.Write("},\"updatedAt\":");
             w.Write(Json.Quote(updatedAt));
             w.Write('}');
+        }
+
+        /*** ビューポート絞り込み ***/
+
+        /// <summary>
+        /// フィーチャの外接矩形を返す（[minLon, minLat, maxLon, maxLat]）。
+        /// geometry の中の数値は座標しか無いので、2つずつ組にして走査するだけで求まる。
+        /// 一度計算したらファイル内の位置をキーにキャッシュする。
+        /// </summary>
+        double[] FeatureBBox(string filePath, GeoFile gf, FeatureRef ft)
+        {
+            string key = filePath + "|" + ft.GeomStart.ToString(CultureInfo.InvariantCulture);
+            lock (bboxGate)
+            {
+                double[] hit;
+                if (bboxCache.TryGetValue(key, out hit)) return hit;
+            }
+
+            double minLon = double.MaxValue, minLat = double.MaxValue;
+            double maxLon = double.MinValue, maxLat = double.MinValue;
+
+            string s = gf.Text;
+            int i = ft.GeomStart;
+            int end = ft.GeomEnd;
+            bool haveLon = false;
+            double lon = 0;
+
+            while (i < end)
+            {
+                char c = s[i];
+                if (c == '-' || (c >= '0' && c <= '9'))
+                {
+                    int start = i;
+                    i++;
+                    while (i < end)
+                    {
+                        char d = s[i];
+                        if ((d >= '0' && d <= '9') || d == '.' || d == 'e' || d == 'E' || d == '+' || d == '-') i++;
+                        else break;
+                    }
+                    double v;
+                    if (double.TryParse(s.Substring(start, i - start), NumberStyles.Float,
+                            CultureInfo.InvariantCulture, out v))
+                    {
+                        if (!haveLon) { lon = v; haveLon = true; }
+                        else
+                        {
+                            if (lon < minLon) minLon = lon;
+                            if (lon > maxLon) maxLon = lon;
+                            if (v < minLat) minLat = v;
+                            if (v > maxLat) maxLat = v;
+                            haveLon = false;
+                        }
+                    }
+                    continue;
+                }
+                // "type": "MultiPolygon" のような文字列は中身を見ない
+                if (c == '"') { Json.SkipString(s, ref i); continue; }
+                i++;
+            }
+
+            double[] box = (minLon <= maxLon)
+                ? new double[] { minLon, minLat, maxLon, maxLat }
+                : null;
+
+            lock (bboxGate)
+            {
+                bboxCache[key] = box;
+            }
+            return box;
+        }
+
+        // bbox が指定されていて、フィーチャがそこに全く重ならなければ送らない
+        bool OutsideView(string filePath, GeoFile gf, FeatureRef ft, double[] view)
+        {
+            if (view == null) return false;
+            double[] b = FeatureBBox(filePath, gf, ft);
+            if (b == null) return false;      // 範囲が取れないものは落とさない
+            if (b[2] < view[0] || b[0] > view[2]) return true;
+            if (b[3] < view[1] || b[1] > view[3]) return true;
+            return false;
+        }
+
+        // "west,south,east,north" を読む。日付変更線をまたぐ指定は絞り込まない。
+        static double[] ParseBBox(string raw)
+        {
+            if (string.IsNullOrEmpty(raw)) return null;
+            string[] parts = raw.Split(',');
+            if (parts.Length < 4) return null;
+            var v = new double[4];
+            for (int i = 0; i < 4; i++)
+            {
+                if (!double.TryParse(parts[i].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out v[i]))
+                    return null;
+            }
+            if (v[0] > v[2]) return null;
+            if (v[1] > v[3]) return null;
+            return v;
+        }
+
+        static double[] BBoxFromJson(List<object> arr)
+        {
+            if (arr == null || arr.Count < 4) return null;
+            var v = new double[4];
+            for (int i = 0; i < 4; i++)
+            {
+                if (!double.TryParse(Json.Str(arr[i]), NumberStyles.Float, CultureInfo.InvariantCulture, out v[i]))
+                    return null;
+            }
+            if (v[0] > v[2] || v[1] > v[3]) return null;
+            return v;
         }
 
         /// <summary>
@@ -569,6 +726,863 @@ namespace JmaMap
                 if (filter.Contains(codes[i])) return true;
             }
             return false;
+        }
+
+        /*** 災害情報（地震・台風）***/
+
+        class PendingQuake
+        {
+            public string Key;        // このファイル内で一致させるコード
+            public string Code;       // フィード側の市区町村コード
+            public string Shindo;
+        }
+
+        /// <summary>
+        /// 地域コードを1つ以上の索引エントリへ解決する。
+        /// 7桁一致 → 6桁 → 政令市の親コード → 気象警報用に細分された区域（市全体のコードで来る情報向け）。
+        /// </summary>
+        static List<IndexEntry> ResolveEntries(GeoIndex idx, Dictionary<string, string> class20Parent, string code)
+        {
+            var list = new List<IndexEntry>(1);
+            IndexEntry pick = idx.Find(code, false);
+            if (pick == null && class20Parent != null)
+            {
+                string parent;
+                if (class20Parent.TryGetValue(code, out parent)) pick = idx.Find(parent, false);
+            }
+            if (pick != null) { list.Add(pick); return list; }
+            return idx.FindSubdivisions(code);
+        }
+
+        // 震度の強さ順。同じポリゴンに複数の市区町村が寄ったときは強いほうを残す。
+        static int ShindoRank(string s)
+        {
+            if (string.IsNullOrEmpty(s)) return 0;
+            switch (s.Trim())
+            {
+                case "1": return 1;
+                case "2": return 2;
+                case "3": return 3;
+                case "4": return 4;
+                case "5-": return 5;
+                case "5+": return 6;
+                case "6-": return 7;
+                case "6+": return 8;
+                case "7": return 9;
+                default: return 0;
+            }
+        }
+
+        static double QueryNum(HttpListenerContext ctx, string name, double fallback)
+        {
+            string raw = ctx.Request.QueryString[name];
+            if (string.IsNullOrEmpty(raw)) return fallback;
+            double v;
+            if (double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out v)) return v;
+            return fallback;
+        }
+
+        void ServeQuakeList(HttpListenerContext ctx)
+        {
+            double hours = QueryNum(ctx, "hours", 24);
+            int max = (int)QueryNum(ctx, "max", 20);
+            List<QuakeItem> items = Disaster.GetRecentQuakes(hours, max);
+
+            var sb = new StringBuilder();
+            sb.Append("{\"items\":[");
+            for (int i = 0; i < items.Count; i++)
+            {
+                QuakeItem q = items[i];
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"eid\":").Append(Json.Quote(q.Eid));
+                sb.Append(",\"title\":").Append(Json.Quote(q.Title));
+                sb.Append(",\"reportedAt\":").Append(Json.Quote(q.ReportedAt));
+                sb.Append(",\"originTime\":").Append(Json.Quote(q.OriginTime));
+                sb.Append(",\"hypocenter\":").Append(Json.Quote(q.Hypocenter));
+                sb.Append(",\"magnitude\":").Append(Json.Quote(q.Magnitude));
+                sb.Append(",\"maxInt\":").Append(Json.Quote(q.MaxInt));
+                sb.Append(",\"cities\":").Append(q.Cities.Count.ToString(CultureInfo.InvariantCulture));
+                if (q.HasCoord)
+                {
+                    sb.Append(",\"lat\":").Append(q.Lat.ToString("R", CultureInfo.InvariantCulture));
+                    sb.Append(",\"lon\":").Append(q.Lon.ToString("R", CultureInfo.InvariantCulture));
+                    sb.Append(",\"depthKm\":").Append(q.DepthKm.ToString("R", CultureInfo.InvariantCulture));
+                }
+                sb.Append('}');
+            }
+            sb.Append("]}");
+            WriteText(ctx, "application/json; charset=utf-8", sb.ToString());
+        }
+
+        void ServeQuakeIntensity(HttpListenerContext ctx)
+        {
+            string eid = "";
+            double zoom = -1;
+
+            if (string.Equals(ctx.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+            {
+                string body;
+                using (var sr = new StreamReader(ctx.Request.InputStream, Encoding.UTF8))
+                {
+                    body = sr.ReadToEnd();
+                }
+                if (body != null && body.Trim().Length > 0)
+                {
+                    var args = Json.Obj(Json.Parse(body));
+                    eid = Json.GetStr(args, "eid").Trim();
+                    object z = Json.Get(args, "zoom");
+                    if (z != null)
+                        double.TryParse(Json.Str(z), NumberStyles.Float, CultureInfo.InvariantCulture, out zoom);
+                }
+            }
+            else
+            {
+                eid = ctx.Request.QueryString["eid"];
+                if (eid == null) eid = "";
+                zoom = QueryNum(ctx, "zoom", -1);
+            }
+
+            // 一覧に出していない古い地震を指定されても拾えるよう、範囲は広めに取る
+            List<QuakeItem> items = Disaster.GetRecentQuakes(72, 100);
+            QuakeItem q = (eid.Length > 0) ? Disaster.FindQuake(items, eid)
+                                           : (items.Count > 0 ? items[0] : null);
+
+            double tolerance = (zoom >= 0) ? cfg.ToleranceForZoom(zoom) : cfg.ToleranceForZoom(0);
+            double[] view = ParseBBox(ctx.Request.QueryString["bbox"]);
+
+            ctx.Response.ContentType = "application/json; charset=utf-8";
+            ctx.Response.SendChunked = true;
+            using (var w = new StreamWriter(ctx.Response.OutputStream, new UTF8Encoding(false)))
+            {
+                WriteQuakeIntensity(w, q, tolerance, view);
+            }
+        }
+
+        /// <summary>
+        /// 市区町村別の震度を、警報と同じ境界データのポリゴンに載せて書き出す。
+        /// コードの解決規則（7桁一致 → 6桁 → 政令市の親コード）は警報と共通。
+        /// </summary>
+        public void WriteQuakeIntensity(TextWriter w, QuakeItem q, double tolerance)
+        {
+            WriteQuakeIntensity(w, q, tolerance, null);
+        }
+
+        public void WriteQuakeIntensity(TextWriter w, QuakeItem q, double tolerance, double[] view)
+        {
+            if (q == null)
+            {
+                w.Write("{\"type\":\"FeatureCollection\",\"features\":[],\"unresolved\":[],\"quake\":null}");
+                return;
+            }
+
+            GeoIndex idx = GetIndex();
+            Dictionary<string, string> class20Parent = Jma.Class20Parent();
+
+            var byFile = new Dictionary<string, List<PendingQuake>>(StringComparer.OrdinalIgnoreCase);
+            var unresolved = new List<string[]>();
+            var strongest = new Dictionary<string, PendingQuake>(StringComparer.Ordinal);
+
+            for (int i = 0; i < q.Cities.Count; i++)
+            {
+                QuakeCityInt ci = q.Cities[i];
+
+                List<IndexEntry> picks = ResolveEntries(idx, class20Parent, ci.Code);
+                if (picks.Count == 0)
+                {
+                    unresolved.Add(new string[] { ci.Code, "INDEX_NOT_FOUND" });
+                    continue;
+                }
+
+                for (int e = 0; e < picks.Count; e++)
+                {
+                    IndexEntry pick = picks[e];
+                    string norm = GeoIndex.NormalizeCode(pick.Raw);
+                    string key = (norm.Length > 0) ? norm : pick.Raw;
+
+                    // 政令市の区が親ポリゴンへ寄ると同じ図形が重なる。強い震度だけを残す。
+                    string dedup = pick.File + "|" + key;
+                    PendingQuake exist;
+                    if (strongest.TryGetValue(dedup, out exist))
+                    {
+                        if (ShindoRank(ci.Shindo) > ShindoRank(exist.Shindo))
+                        {
+                            exist.Shindo = ci.Shindo;
+                            exist.Code = ci.Code;
+                        }
+                        continue;
+                    }
+
+                    var p = new PendingQuake();
+                    p.Key = key;
+                    p.Code = ci.Code;
+                    p.Shindo = ci.Shindo;
+                    strongest[dedup] = p;
+
+                    List<PendingQuake> list;
+                    if (!byFile.TryGetValue(pick.File, out list))
+                    {
+                        list = new List<PendingQuake>();
+                        byFile[pick.File] = list;
+                    }
+                    list.Add(p);
+                }
+            }
+
+            w.Write("{\"type\":\"FeatureCollection\",\"features\":[");
+
+            bool first = true;
+            foreach (var kv in byFile)
+            {
+                GeoFile gf;
+                try
+                {
+                    gf = store.Get(kv.Key);
+                }
+                catch (Exception ex)
+                {
+                    Trace("GeoJSON読み込み失敗 " + Path.GetFileName(kv.Key) + ": " + ex.Message);
+                    for (int i = 0; i < kv.Value.Count; i++)
+                        unresolved.Add(new string[] { kv.Value[i].Code, "GEOJSON_LOAD_FAILED" });
+                    continue;
+                }
+
+                var map7 = new Dictionary<string, FeatureRef>(StringComparer.Ordinal);
+                var map6 = new Dictionary<string, FeatureRef>(StringComparer.Ordinal);
+                for (int f = 0; f < gf.Features.Count; f++)
+                {
+                    FeatureRef fr = gf.Features[f];
+                    if (!GeoJson.HasGeometry(fr)) continue;
+                    string propCode = GeoIndex.NormalizeCode(fr.Code);
+                    if (propCode.Length == 7)
+                    {
+                        if (!map7.ContainsKey(propCode)) map7[propCode] = fr;
+                        string h6 = propCode.Substring(0, 6);
+                        if (!map6.ContainsKey(h6)) map6[h6] = fr;
+                    }
+                    else if (propCode.Length == 6)
+                    {
+                        if (!map6.ContainsKey(propCode)) map6[propCode] = fr;
+                    }
+                }
+
+                for (int i = 0; i < kv.Value.Count; i++)
+                {
+                    PendingQuake p = kv.Value[i];
+                    FeatureRef ft;
+                    if (!map7.TryGetValue(p.Key, out ft))
+                    {
+                        if (!map6.TryGetValue(Head6(p.Key), out ft)) ft = null;
+                    }
+                    if (ft == null)
+                    {
+                        unresolved.Add(new string[] { p.Code, "FEATURE_NOT_FOUND" });
+                        continue;
+                    }
+                    if (OutsideView(kv.Key, gf, ft, view)) continue;
+
+                    if (!first) w.Write(',');
+                    first = false;
+                    w.Write("{\"type\":\"Feature\",\"properties\":{\"code\":");
+                    w.Write(Json.Quote(p.Code));
+                    w.Write(",\"name\":");
+                    w.Write(Json.Quote(ft.Name));
+                    w.Write(",\"shindo\":");
+                    w.Write(Json.Quote(p.Shindo));
+                    w.Write("},\"geometry\":");
+                    w.Write(GetGeometryJson(kv.Key, gf, ft, tolerance));
+                    w.Write('}');
+                }
+            }
+
+            w.Write("],\"unresolved\":[");
+            for (int i = 0; i < unresolved.Count; i++)
+            {
+                if (i > 0) w.Write(',');
+                w.Write("{\"code\":");
+                w.Write(Json.Quote(unresolved[i][0]));
+                w.Write(",\"reason\":");
+                w.Write(Json.Quote(unresolved[i][1]));
+                w.Write('}');
+            }
+            w.Write("],\"quake\":{\"eid\":");
+            w.Write(Json.Quote(q.Eid));
+            w.Write(",\"title\":");
+            w.Write(Json.Quote(q.Title));
+            w.Write(",\"originTime\":");
+            w.Write(Json.Quote(q.OriginTime));
+            w.Write(",\"hypocenter\":");
+            w.Write(Json.Quote(q.Hypocenter));
+            w.Write(",\"magnitude\":");
+            w.Write(Json.Quote(q.Magnitude));
+            w.Write(",\"maxInt\":");
+            w.Write(Json.Quote(q.MaxInt));
+            if (q.HasCoord)
+            {
+                w.Write(",\"lat\":");
+                w.Write(q.Lat.ToString("R", CultureInfo.InvariantCulture));
+                w.Write(",\"lon\":");
+                w.Write(q.Lon.ToString("R", CultureInfo.InvariantCulture));
+                w.Write(",\"depthKm\":");
+                w.Write(q.DepthKm.ToString("R", CultureInfo.InvariantCulture));
+            }
+            w.Write("}}");
+        }
+
+        void ServeTyphoon(HttpListenerContext ctx)
+        {
+            List<TyphoonItem> items = Disaster.GetTyphoons();
+            var sb = new StringBuilder();
+            sb.Append("{\"items\":[");
+            for (int i = 0; i < items.Count; i++)
+            {
+                TyphoonItem t = items[i];
+                if (i > 0) sb.Append(',');
+                sb.Append("{\"id\":").Append(Json.Quote(t.Id));
+                sb.Append(",\"number\":").Append(Json.Quote(t.Number));
+                sb.Append(",\"nameJp\":").Append(Json.Quote(t.NameJp));
+                sb.Append(",\"nameEn\":").Append(Json.Quote(t.NameEn));
+                sb.Append(",\"category\":").Append(Json.Quote(t.Category));
+                sb.Append(",\"issue\":").Append(Json.Quote(t.Issue));
+                sb.Append(",\"trackPre\":");
+                AppendTrack(sb, t.TrackPre);
+                sb.Append(",\"trackTyphoon\":");
+                AppendTrack(sb, t.TrackTyphoon);
+                if (t.HasGale)
+                {
+                    sb.Append(",\"gale\":{\"lat\":").Append(t.GaleLat.ToString("R", CultureInfo.InvariantCulture));
+                    sb.Append(",\"lon\":").Append(t.GaleLon.ToString("R", CultureInfo.InvariantCulture));
+                    sb.Append(",\"radius\":").Append(t.GaleRadiusM.ToString("R", CultureInfo.InvariantCulture));
+                    sb.Append('}');
+                }
+                sb.Append(",\"points\":[");
+                for (int k = 0; k < t.Points.Count; k++)
+                {
+                    TyphoonPoint p = t.Points[k];
+                    if (k > 0) sb.Append(',');
+                    sb.Append("{\"part\":").Append(Json.Quote(p.Part));
+                    sb.Append(",\"advancedHours\":").Append(p.AdvancedHours.ToString(CultureInfo.InvariantCulture));
+                    sb.Append(",\"validTime\":").Append(Json.Quote(p.ValidTime));
+                    sb.Append(",\"lat\":").Append(p.Lat.ToString("R", CultureInfo.InvariantCulture));
+                    sb.Append(",\"lon\":").Append(p.Lon.ToString("R", CultureInfo.InvariantCulture));
+                    sb.Append(",\"radius\":").Append(p.CircleRadiusM.ToString("R", CultureInfo.InvariantCulture));
+                    sb.Append(",\"category\":").Append(Json.Quote(p.Category));
+                    sb.Append(",\"pressure\":").Append(Json.Quote(p.Pressure));
+                    sb.Append(",\"wind\":").Append(Json.Quote(p.WindSustained));
+                    sb.Append(",\"gust\":").Append(Json.Quote(p.WindGust));
+                    sb.Append(",\"course\":").Append(Json.Quote(p.Course));
+                    sb.Append(",\"speed\":").Append(Json.Quote(p.Speed));
+                    sb.Append(",\"location\":").Append(Json.Quote(p.Location));
+                    sb.Append('}');
+                }
+                sb.Append("]}");
+            }
+            sb.Append("]}");
+            WriteText(ctx, "application/json; charset=utf-8", sb.ToString());
+        }
+
+        static void AppendTrack(StringBuilder sb, List<double[]> track)
+        {
+            sb.Append('[');
+            if (track != null)
+            {
+                for (int i = 0; i < track.Count; i++)
+                {
+                    if (i > 0) sb.Append(',');
+                    sb.Append('[').Append(track[i][0].ToString("R", CultureInfo.InvariantCulture));
+                    sb.Append(',').Append(track[i][1].ToString("R", CultureInfo.InvariantCulture)).Append(']');
+                }
+            }
+            sb.Append(']');
+        }
+
+        /*** 噴火警報・降灰予報・指定河川洪水予報 ***/
+
+        // 「地域コードの一覧をポリゴンに塗る」だけの共通処理。
+        // 塗る対象がどの情報かは PropsJson（properties へ足す JSON 断片）で区別する。
+        class PaintItem
+        {
+            public string Code;        // フィード側のコード（表示用）
+            public int Rank;           // 同じポリゴンが重なったとき、大きいほうを残す
+            public string PropsJson;   // 例: ",\"kind\":\"volcano\",\"volcano\":\"桜島\""
+        }
+
+        class PaintResolved
+        {
+            public string Key;
+            public string Code;
+            public int Rank;
+            public string PropsJson;
+        }
+
+        /// <summary>
+        /// コード一覧を境界ポリゴンへ解決して FeatureCollection の features 部分を書き出す。
+        /// 解決規則（7桁一致 → 6桁 → 政令市の親コード）は警報・震度と共通。
+        /// </summary>
+        void WritePaintedFeatures(TextWriter w, List<PaintItem> items, double tolerance, List<string[]> unresolved)
+        {
+            WritePaintedFeatures(w, items, tolerance, unresolved, null);
+        }
+
+        void WritePaintedFeatures(TextWriter w, List<PaintItem> items, double tolerance,
+                                  List<string[]> unresolved, double[] view)
+        {
+            GeoIndex idx = GetIndex();
+            Dictionary<string, string> class20Parent = Jma.Class20Parent();
+
+            var byFile = new Dictionary<string, List<PaintResolved>>(StringComparer.OrdinalIgnoreCase);
+            var best = new Dictionary<string, PaintResolved>(StringComparer.Ordinal);
+
+            for (int i = 0; i < items.Count; i++)
+            {
+                PaintItem it = items[i];
+                if (it.Code == null || it.Code.Length == 0) continue;
+
+                List<IndexEntry> picks = ResolveEntries(idx, class20Parent, it.Code);
+                if (picks.Count == 0)
+                {
+                    unresolved.Add(new string[] { it.Code, "INDEX_NOT_FOUND" });
+                    continue;
+                }
+
+                for (int e = 0; e < picks.Count; e++)
+                {
+                    IndexEntry pick = picks[e];
+                    string norm = GeoIndex.NormalizeCode(pick.Raw);
+                    string key = (norm.Length > 0) ? norm : pick.Raw;
+                    string dedup = pick.File + "|" + key + "|" + it.PropsJson;
+
+                    PaintResolved exist;
+                    if (best.TryGetValue(dedup, out exist))
+                    {
+                        if (it.Rank > exist.Rank) { exist.Rank = it.Rank; exist.Code = it.Code; }
+                        continue;
+                    }
+
+                    var r = new PaintResolved();
+                    r.Key = key;
+                    r.Code = it.Code;
+                    r.Rank = it.Rank;
+                    r.PropsJson = it.PropsJson;
+                    best[dedup] = r;
+
+                    List<PaintResolved> list;
+                    if (!byFile.TryGetValue(pick.File, out list))
+                    {
+                        list = new List<PaintResolved>();
+                        byFile[pick.File] = list;
+                    }
+                    list.Add(r);
+                }
+            }
+
+            bool first = true;
+            foreach (var kv in byFile)
+            {
+                GeoFile gf;
+                try
+                {
+                    gf = store.Get(kv.Key);
+                }
+                catch (Exception ex)
+                {
+                    Trace("GeoJSON読み込み失敗 " + Path.GetFileName(kv.Key) + ": " + ex.Message);
+                    for (int i = 0; i < kv.Value.Count; i++)
+                        unresolved.Add(new string[] { kv.Value[i].Code, "GEOJSON_LOAD_FAILED" });
+                    continue;
+                }
+
+                var map7 = new Dictionary<string, FeatureRef>(StringComparer.Ordinal);
+                var map6 = new Dictionary<string, FeatureRef>(StringComparer.Ordinal);
+                for (int f = 0; f < gf.Features.Count; f++)
+                {
+                    FeatureRef fr = gf.Features[f];
+                    if (!GeoJson.HasGeometry(fr)) continue;
+                    string propCode = GeoIndex.NormalizeCode(fr.Code);
+                    if (propCode.Length == 7)
+                    {
+                        if (!map7.ContainsKey(propCode)) map7[propCode] = fr;
+                        string h6 = propCode.Substring(0, 6);
+                        if (!map6.ContainsKey(h6)) map6[h6] = fr;
+                    }
+                    else if (propCode.Length == 6)
+                    {
+                        if (!map6.ContainsKey(propCode)) map6[propCode] = fr;
+                    }
+                }
+
+                for (int i = 0; i < kv.Value.Count; i++)
+                {
+                    PaintResolved p = kv.Value[i];
+                    FeatureRef ft;
+                    if (!map7.TryGetValue(p.Key, out ft))
+                    {
+                        if (!map6.TryGetValue(Head6(p.Key), out ft)) ft = null;
+                    }
+                    if (ft == null)
+                    {
+                        unresolved.Add(new string[] { p.Code, "FEATURE_NOT_FOUND" });
+                        continue;
+                    }
+                    if (OutsideView(kv.Key, gf, ft, view)) continue;
+
+                    if (!first) w.Write(',');
+                    first = false;
+                    w.Write("{\"type\":\"Feature\",\"properties\":{\"code\":");
+                    w.Write(Json.Quote(p.Code));
+                    w.Write(",\"name\":");
+                    w.Write(Json.Quote(ft.Name));
+                    w.Write(p.PropsJson);
+                    w.Write("},\"geometry\":");
+                    w.Write(GetGeometryJson(kv.Key, gf, ft, tolerance));
+                    w.Write('}');
+                }
+            }
+        }
+
+        static void WriteUnresolved(TextWriter w, List<string[]> unresolved)
+        {
+            w.Write("[");
+            for (int i = 0; i < unresolved.Count; i++)
+            {
+                if (i > 0) w.Write(',');
+                w.Write("{\"code\":");
+                w.Write(Json.Quote(unresolved[i][0]));
+                w.Write(",\"reason\":");
+                w.Write(Json.Quote(unresolved[i][1]));
+                w.Write('}');
+            }
+            w.Write("]");
+        }
+
+        void ServeVolcano(HttpListenerContext ctx)
+        {
+            double zoom = QueryNum(ctx, "zoom", -1);
+            double tolerance = (zoom >= 0) ? cfg.ToleranceForZoom(zoom) : cfg.ToleranceForZoom(0);
+
+            List<VolcanoWarn> warns = Hazards.GetVolcanoWarnings();
+            List<AshFall> ashes = Hazards.GetAshFalls(40);
+
+            var items = new List<PaintItem>();
+            for (int i = 0; i < warns.Count; i++)
+            {
+                VolcanoWarn v = warns[i];
+                string props = ",\"kind\":\"volcano\",\"volcano\":" + Json.Quote(v.VolcanoName)
+                             + ",\"warnName\":" + Json.Quote(v.KindName)
+                             + ",\"warnCode\":" + Json.Quote(v.KindCode)
+                             + ",\"levelName\":" + Json.Quote(v.LevelName);
+                for (int m = 0; m < v.Municipalities.Count; m++)
+                {
+                    var p = new PaintItem();
+                    p.Code = v.Municipalities[m];
+                    p.Rank = Hazards.VolcanoRank(v.KindCode);
+                    p.PropsJson = props;
+                    items.Add(p);
+                }
+            }
+            for (int i = 0; i < ashes.Count; i++)
+            {
+                AshFall a = ashes[i];
+                string ashProps = ",\"kind\":\"ash\",\"volcano\":" + Json.Quote(a.VolcanoName);
+                for (int m = 0; m < a.Ash.Count; m++)
+                {
+                    var p = new PaintItem();
+                    p.Code = a.Ash[m];
+                    p.Rank = 1;
+                    p.PropsJson = ashProps;
+                    items.Add(p);
+                }
+                string stoneProps = ",\"kind\":\"stone\",\"volcano\":" + Json.Quote(a.VolcanoName);
+                for (int m = 0; m < a.Stone.Count; m++)
+                {
+                    var p = new PaintItem();
+                    p.Code = a.Stone[m];
+                    p.Rank = 2;
+                    p.PropsJson = stoneProps;
+                    items.Add(p);
+                }
+            }
+
+            var unresolved = new List<string[]>();
+            ctx.Response.ContentType = "application/json; charset=utf-8";
+            ctx.Response.SendChunked = true;
+            using (var w = new StreamWriter(ctx.Response.OutputStream, new UTF8Encoding(false)))
+            {
+                w.Write("{\"type\":\"FeatureCollection\",\"features\":[");
+                WritePaintedFeatures(w, items, tolerance, unresolved, ParseBBox(ctx.Request.QueryString["bbox"]));
+                w.Write("],\"unresolved\":");
+                WriteUnresolved(w, unresolved);
+
+                w.Write(",\"warnings\":[");
+                for (int i = 0; i < warns.Count; i++)
+                {
+                    VolcanoWarn v = warns[i];
+                    if (i > 0) w.Write(',');
+                    w.Write("{\"volcano\":");
+                    w.Write(Json.Quote(v.VolcanoName));
+                    w.Write(",\"volcanoCode\":");
+                    w.Write(Json.Quote(v.VolcanoCode));
+                    w.Write(",\"warnName\":");
+                    w.Write(Json.Quote(v.KindName));
+                    w.Write(",\"warnCode\":");
+                    w.Write(Json.Quote(v.KindCode));
+                    w.Write(",\"levelName\":");
+                    w.Write(Json.Quote(v.LevelName));
+                    w.Write(",\"reportedAt\":");
+                    w.Write(Json.Quote(v.ReportedAt));
+                    w.Write(",\"areas\":");
+                    WriteStrArray(w, v.Municipalities);
+                    w.Write('}');
+                }
+                w.Write("],\"ash\":[");
+                for (int i = 0; i < ashes.Count; i++)
+                {
+                    AshFall a = ashes[i];
+                    if (i > 0) w.Write(',');
+                    w.Write("{\"volcano\":");
+                    w.Write(Json.Quote(a.VolcanoName));
+                    w.Write(",\"reportedAt\":");
+                    w.Write(Json.Quote(a.ReportedAt));
+                    w.Write(",\"headline\":");
+                    w.Write(Json.Quote(a.Headline));
+                    w.Write(",\"ashAreas\":");
+                    w.Write(a.Ash.Count.ToString(CultureInfo.InvariantCulture));
+                    w.Write(",\"stoneAreas\":");
+                    w.Write(a.Stone.Count.ToString(CultureInfo.InvariantCulture));
+                    if (a.HasCoord)
+                    {
+                        w.Write(",\"lat\":");
+                        w.Write(a.Lat.ToString("R", CultureInfo.InvariantCulture));
+                        w.Write(",\"lon\":");
+                        w.Write(a.Lon.ToString("R", CultureInfo.InvariantCulture));
+                    }
+                    w.Write('}');
+                }
+                w.Write("]}");
+            }
+        }
+
+        void ServeFlood(HttpListenerContext ctx)
+        {
+            double zoom = QueryNum(ctx, "zoom", -1);
+            double tolerance = (zoom >= 0) ? cfg.ToleranceForZoom(zoom) : cfg.ToleranceForZoom(0);
+
+            List<FloodWarn> floods = Hazards.GetFloodWarnings(60);
+
+            // 同じ府県に複数の河川が出ていることがあるので、最も高いレベルで塗る。
+            // 解除済みの河川は一覧には残すが塗らない。
+            var items = new List<PaintItem>();
+            for (int i = 0; i < floods.Count; i++)
+            {
+                FloodWarn f = floods[i];
+                if (f.Cleared) continue;
+                string props = ",\"kind\":\"flood\",\"level\":" + f.Level.ToString(CultureInfo.InvariantCulture)
+                             + ",\"warnName\":" + Json.Quote(f.KindName);
+                for (int p = 0; p < f.PrefCodes.Count; p++)
+                {
+                    var it = new PaintItem();
+                    it.Code = f.PrefCodes[p];
+                    it.Rank = f.Level;
+                    it.PropsJson = props;
+                    items.Add(it);
+                }
+            }
+
+            var unresolved = new List<string[]>();
+            ctx.Response.ContentType = "application/json; charset=utf-8";
+            ctx.Response.SendChunked = true;
+            using (var w = new StreamWriter(ctx.Response.OutputStream, new UTF8Encoding(false)))
+            {
+                w.Write("{\"type\":\"FeatureCollection\",\"features\":[");
+                WritePaintedFeatures(w, items, tolerance, unresolved, ParseBBox(ctx.Request.QueryString["bbox"]));
+                w.Write("],\"unresolved\":");
+                WriteUnresolved(w, unresolved);
+
+                w.Write(",\"rivers\":[");
+                for (int i = 0; i < floods.Count; i++)
+                {
+                    FloodWarn f = floods[i];
+                    if (i > 0) w.Write(',');
+                    w.Write("{\"river\":");
+                    w.Write(Json.Quote(f.RiverName));
+                    w.Write(",\"riverCode\":");
+                    w.Write(Json.Quote(f.RiverCode));
+                    w.Write(",\"level\":");
+                    w.Write(f.Level.ToString(CultureInfo.InvariantCulture));
+                    w.Write(",\"warnName\":");
+                    w.Write(Json.Quote(f.KindName));
+                    w.Write(",\"title\":");
+                    w.Write(Json.Quote(f.Title));
+                    w.Write(",\"headline\":");
+                    w.Write(Json.Quote(f.Headline));
+                    w.Write(",\"reportedAt\":");
+                    w.Write(Json.Quote(f.ReportedAt));
+                    w.Write(",\"cleared\":");
+                    w.Write(f.Cleared ? "true" : "false");
+                    w.Write(",\"prefs\":");
+                    WriteStrArray(w, f.PrefNames);
+                    w.Write(",\"sections\":");
+                    WriteStrArray(w, f.Sections);
+                    w.Write('}');
+                }
+                w.Write("]}");
+            }
+        }
+
+        /// <summary>
+        /// 津波予報区データの自己診断。発表が無いときでも「フィードのコードで海岸線を引けるか」
+        /// 「線データを間引けるか」を確かめられるようにしてある。
+        /// </summary>
+        public string CheckTsunamiData(List<string> probeCodes, double tolerance)
+        {
+            string geoPath = cfg.Resolve(cfg.TsunamiGeoJson);
+            if (!File.Exists(geoPath)) return "GeoJSONがありません: " + geoPath;
+
+            GeoFile gf;
+            try { gf = store.Get(geoPath); }
+            catch (Exception ex) { return "読み込み失敗: " + ex.Message; }
+
+            var byCode = new Dictionary<string, FeatureRef>(StringComparer.Ordinal);
+            for (int i = 0; i < gf.Features.Count; i++)
+            {
+                FeatureRef fr = gf.Features[i];
+                if (!GeoJson.HasGeometry(fr)) continue;
+                string c = (fr.Code == null) ? "" : fr.Code.Trim();
+                if (c.Length > 0 && !byCode.ContainsKey(c)) byCode[c] = fr;
+            }
+
+            var sb = new StringBuilder();
+            sb.Append("区域 ").Append(byCode.Count.ToString(CultureInfo.InvariantCulture)).Append(" 件収録");
+            if (probeCodes != null)
+            {
+                for (int i = 0; i < probeCodes.Count; i++)
+                {
+                    string code = probeCodes[i];
+                    FeatureRef ft;
+                    sb.Append(" / ").Append(code);
+                    if (!byCode.TryGetValue(code, out ft)) { sb.Append("→未収録"); continue; }
+                    string geom = GetGeometryJson(geoPath, gf, ft, tolerance);
+                    string type = geom.IndexOf("MultiLineString", StringComparison.Ordinal) >= 0 ? "MultiLineString"
+                                : geom.IndexOf("LineString", StringComparison.Ordinal) >= 0 ? "LineString" : "?";
+                    sb.Append("→OK ").Append(ft.Name).Append(' ').Append(type)
+                      .Append(' ').Append((geom.Length / 1024).ToString(CultureInfo.InvariantCulture)).Append("KB");
+                }
+            }
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// 津波警報・注意報。区域は3桁の津波予報区コードで、6/7桁前提の索引には載らないため、
+        /// 専用の海岸線GeoJSON（線データ）を直接引く。
+        /// </summary>
+        void ServeTsunami(HttpListenerContext ctx)
+        {
+            double zoom = QueryNum(ctx, "zoom", -1);
+            double tolerance = (zoom >= 0) ? cfg.ToleranceForZoom(zoom) : cfg.ToleranceForZoom(0);
+
+            double[] view = ParseBBox(ctx.Request.QueryString["bbox"]);
+            TsunamiReport rep = Hazards.GetTsunami();
+            string geoPath = cfg.Resolve(cfg.TsunamiGeoJson);
+
+            GeoFile gf = null;
+            string loadError = null;
+            if (File.Exists(geoPath))
+            {
+                try { gf = store.Get(geoPath); }
+                catch (Exception ex) { loadError = ex.Message; }
+            }
+            else loadError = "津波予報区のGeoJSONがありません: " + geoPath;
+
+            var byCode = new Dictionary<string, FeatureRef>(StringComparer.Ordinal);
+            if (gf != null)
+            {
+                for (int i = 0; i < gf.Features.Count; i++)
+                {
+                    FeatureRef fr = gf.Features[i];
+                    if (!GeoJson.HasGeometry(fr)) continue;
+                    string c = (fr.Code == null) ? "" : fr.Code.Trim();
+                    if (c.Length > 0 && !byCode.ContainsKey(c)) byCode[c] = fr;
+                }
+            }
+
+            var unresolved = new List<string[]>();
+            ctx.Response.ContentType = "application/json; charset=utf-8";
+            ctx.Response.SendChunked = true;
+            using (var w = new StreamWriter(ctx.Response.OutputStream, new UTF8Encoding(false)))
+            {
+                w.Write("{\"type\":\"FeatureCollection\",\"features\":[");
+                bool first = true;
+                for (int i = 0; i < rep.Areas.Count; i++)
+                {
+                    TsunamiArea a = rep.Areas[i];
+                    int rank = Hazards.TsunamiRank(a.KindName);
+                    if (rank <= 0) continue;              // 解除・津波なしは描かない
+
+                    FeatureRef ft;
+                    if (gf == null || !byCode.TryGetValue(a.Code, out ft))
+                    {
+                        unresolved.Add(new string[] { a.Code, gf == null ? "GEOJSON_MISSING" : "AREA_NOT_FOUND" });
+                        continue;
+                    }
+                    if (OutsideView(geoPath, gf, ft, view)) continue;
+
+                    if (!first) w.Write(',');
+                    first = false;
+                    w.Write("{\"type\":\"Feature\",\"properties\":{\"code\":");
+                    w.Write(Json.Quote(a.Code));
+                    w.Write(",\"name\":");
+                    w.Write(Json.Quote(a.Name.Length > 0 ? a.Name : ft.Name));
+                    w.Write(",\"kind\":\"tsunami\",\"warnName\":");
+                    w.Write(Json.Quote(a.KindName));
+                    w.Write(",\"rank\":");
+                    w.Write(rank.ToString(CultureInfo.InvariantCulture));
+                    w.Write(",\"maxHeight\":");
+                    w.Write(Json.Quote(a.MaxHeight));
+                    w.Write(",\"firstHeight\":");
+                    w.Write(Json.Quote(a.FirstHeight));
+                    w.Write("},\"geometry\":");
+                    w.Write(GetGeometryJson(geoPath, gf, ft, tolerance));
+                    w.Write('}');
+                }
+                w.Write("],\"unresolved\":");
+                WriteUnresolved(w, unresolved);
+
+                w.Write(",\"report\":{\"eventId\":");
+                w.Write(Json.Quote(rep.EventId));
+                w.Write(",\"title\":");
+                w.Write(Json.Quote(rep.Title));
+                w.Write(",\"reportedAt\":");
+                w.Write(Json.Quote(rep.ReportedAt));
+                w.Write(",\"hypocenter\":");
+                w.Write(Json.Quote(rep.Hypocenter));
+                w.Write(",\"magnitude\":");
+                w.Write(Json.Quote(rep.Magnitude));
+                w.Write(",\"cleared\":");
+                w.Write(rep.Cleared ? "true" : "false");
+                w.Write(",\"areas\":[");
+                for (int i = 0; i < rep.Areas.Count; i++)
+                {
+                    TsunamiArea a = rep.Areas[i];
+                    if (i > 0) w.Write(',');
+                    w.Write("{\"code\":");
+                    w.Write(Json.Quote(a.Code));
+                    w.Write(",\"name\":");
+                    w.Write(Json.Quote(a.Name));
+                    w.Write(",\"warnName\":");
+                    w.Write(Json.Quote(a.KindName));
+                    w.Write(",\"rank\":");
+                    w.Write(Hazards.TsunamiRank(a.KindName).ToString(CultureInfo.InvariantCulture));
+                    w.Write(",\"maxHeight\":");
+                    w.Write(Json.Quote(a.MaxHeight));
+                    w.Write('}');
+                }
+                w.Write("]}");
+                if (loadError != null)
+                {
+                    w.Write(",\"dataError\":");
+                    w.Write(Json.Quote(loadError));
+                }
+                w.Write('}');
+            }
         }
     }
 }

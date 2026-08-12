@@ -133,6 +133,12 @@
         <button id="btnFetch" class="chip primary" title="JMAから最新を取得">最新を取得</button>
         <button id="btnReset" class="chip" title="初期表示に戻す">リセット</button>
       </div>
+      <div class="row" style="margin-top:6px;">
+        <label class="chip" data-layer="auto" title="60秒ごとに表示中のレイヤーを取り直します">
+          <input type="checkbox" id="chkAuto" checked />自動更新
+        </label>
+        <span id="autoAge" style="opacity:.7; font-size:11px;">未取得</span>
+      </div>
     </div>
 
     <div class="section">
@@ -159,7 +165,8 @@
         <div class="row">
           <label class="chip" data-phenom="oame"><input type="checkbox" checked />大雨</label>
           <label class="chip" data-phenom="dosha"><input type="checkbox" checked />土砂</label>
-          <label class="chip" data-phenom="kousui"><input type="checkbox" checked />洪水</label>
+          <label class="chip" data-phenom="kousui"
+                 title="市町村単位の洪水警報・注意報（コード04/18）だけを指します。河川ごとの氾濫危険情報は別系統のため、「災害情報レイヤー」の「河川氾濫」を使ってください。"><input type="checkbox" checked />洪水</label>
           <label class="chip" data-phenom="takashio"><input type="checkbox" checked />高潮</label>
         </div>
         <div class="row">
@@ -188,8 +195,39 @@
     </div>
 
     <div class="section">
-      <h3>警報発令エリア内の地点（<span id="pointsInWarningCount">0</span>件）</h3>
-      <div class="control" id="pointsInWarningList" style="max-height:220px; overflow:auto;"></div>
+      <h3>災害情報レイヤー</h3>
+      <div class="row">
+        <label class="chip" data-layer="quake"><input type="checkbox" id="chkQuake" />地震・震度</label>
+        <label class="chip" data-layer="typhoon"><input type="checkbox" id="chkTyphoon" />台風</label>
+      </div>
+      <div class="row">
+        <label class="chip" data-layer="volcano"><input type="checkbox" id="chkVolcano" />噴火・降灰</label>
+        <label class="chip" data-layer="flood"><input type="checkbox" id="chkFlood" />河川氾濫</label>
+        <label class="chip" data-layer="tsunami"><input type="checkbox" id="chkTsunami" />津波</label>
+      </div>
+      <div class="control" id="tsunamiPanel" style="display:none; margin-top:6px;">
+        <div id="tsunamiList" style="max-height:180px; overflow:auto;"></div>
+      </div>
+      <div class="control" id="volcanoPanel" style="display:none; margin-top:6px;">
+        <div id="volcanoList" style="max-height:180px; overflow:auto;"></div>
+      </div>
+      <div class="control" id="floodPanel" style="display:none; margin-top:6px;">
+        <div id="floodList" style="max-height:200px; overflow:auto;"></div>
+      </div>
+      <div class="control" id="quakePanel" style="display:none; margin-top:6px;">
+        <div style="font-size:11px; opacity:.75; margin-bottom:4px;">直近24時間の地震（クリックで表示）</div>
+        <div id="quakeList" style="max-height:180px; overflow:auto;"></div>
+      </div>
+      <div class="control" id="typhoonPanel" style="display:none; margin-top:6px;">
+        <div id="typhoonList"></div>
+      </div>
+    </div>
+
+    <div class="section">
+      <h3>影響を受ける地点（<span id="pointsInWarningCount">0</span>件）</h3>
+      <div class="control" id="pointsInWarningList" style="max-height:260px; overflow:auto;"></div>
+      <div style="font-size:11px; opacity:.6; margin-top:4px;">
+        警報のほか、表示中の災害情報レイヤー（震度・噴火・降灰・河川氾濫・津波）も判定に含めます。</div>
     </div>
 
     <div class="section">
@@ -199,6 +237,45 @@
         <div class="row"><span class="swatch" style="background:#aa00aa;"></span>危険警報</div>
         <div class="row"><span class="swatch" style="background:#ff2800;"></span>警報</div>
         <div class="row"><span class="swatch" style="background:#f2e700;"></span>注意報</div>
+      </div>
+      <div class="control" id="shindoLegend" style="display:none; margin-top:6px;">
+        <div style="font-size:11px; opacity:.75; margin-bottom:4px;">震度</div>
+        <div class="row">
+          <span class="swatch" style="background:#f2f2ff;"></span>1
+          <span class="swatch" style="background:#00aaff;"></span>2
+          <span class="swatch" style="background:#0041ff;"></span>3
+          <span class="swatch" style="background:#fae696;"></span>4
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:#ffe600;"></span>5弱
+          <span class="swatch" style="background:#ff9900;"></span>5強
+          <span class="swatch" style="background:#ff2800;"></span>6弱
+        </div>
+        <div class="row">
+          <span class="swatch" style="background:#a50021;"></span>6強
+          <span class="swatch" style="background:#b40068;"></span>7
+        </div>
+      </div>
+      <div class="control" id="volcanoLegend" style="display:none; margin-top:6px;">
+        <div style="font-size:11px; opacity:.75; margin-bottom:4px;">噴火・降灰</div>
+        <div class="row"><span class="swatch" style="background:#b40068;"></span>噴火警報（居住地域）</div>
+        <div class="row"><span class="swatch" style="background:#ff2800;"></span>火口周辺警報</div>
+        <div class="row"><span class="swatch" style="background:#ff9900;"></span>噴火警報（周辺海域）</div>
+        <div class="row"><span class="swatch" style="background:#a08060;"></span>降灰</div>
+        <div class="row"><span class="swatch" style="background:#6b3a1a;"></span>小さな噴石</div>
+      </div>
+      <div class="control" id="tsunamiLegend" style="display:none; margin-top:6px;">
+        <div style="font-size:11px; opacity:.75; margin-bottom:4px;">津波（海岸線）</div>
+        <div class="row"><span class="swatch" style="background:#b40068;"></span>大津波警報</div>
+        <div class="row"><span class="swatch" style="background:#ff2800;"></span>津波警報</div>
+        <div class="row"><span class="swatch" style="background:#f2e700;"></span>津波注意報</div>
+      </div>
+      <div class="control" id="floodLegend" style="display:none; margin-top:6px;">
+        <div style="font-size:11px; opacity:.75; margin-bottom:4px;">指定河川洪水予報（府県単位）</div>
+        <div class="row"><span class="swatch" style="background:#0c000c;"></span>レベル5 氾濫発生</div>
+        <div class="row"><span class="swatch" style="background:#aa00aa;"></span>レベル4 氾濫危険</div>
+        <div class="row"><span class="swatch" style="background:#ff2800;"></span>レベル3 氾濫警戒</div>
+        <div class="row"><span class="swatch" style="background:#f2e700;"></span>レベル2 氾濫注意</div>
       </div>
     </div>
 
@@ -215,7 +292,7 @@
     <div class="stat">選択: <span id="sel">0</span> 件</div>
     <div class="stat">地点: <span id="pointCount">0</span> 件</div>
     <div class="stat">ズーム: <span id="zoom">-</span></div>
-    <div class="stat" style="margin-left:auto;">出典: 気象庁（警報・注意報／予報区等GIS）｜気象庁発表を表示</div>
+    <div class="stat" style="margin-left:auto;">出典: 気象庁（警報・注意報／震源・震度／台風／予報区等GIS）｜気象庁発表を表示</div>
   </footer>
 </div>
 
@@ -522,6 +599,80 @@ function pointInGeometry(lng, lat, geometry) {
 
 const LEVEL_LABEL = { tokubetsu: '特別警報', kiken: '危険警報', keihou: '警報', chuui: '注意報' };
 
+// 津波は面ではなく海岸線なので、点が「線からどれだけ離れているか」で判定する
+const TSUNAMI_NEAR_KM = 5;
+
+function segmentDistanceKm(lng, lat, ax, ay, bx, by) {
+  // 日本付近の緯度なら、経度差を cos(緯度) で縮めた平面近似で十分
+  const k = Math.cos(lat * Math.PI / 180);
+  const px = (lng - ax) * k, py = lat - ay;
+  const vx = (bx - ax) * k, vy = by - ay;
+  const len2 = vx * vx + vy * vy;
+  let t = (len2 > 0) ? ((px * vx + py * vy) / len2) : 0;
+  t = Math.max(0, Math.min(1, t));
+  const dx = px - vx * t, dy = py - vy * t;
+  return Math.sqrt(dx * dx + dy * dy) * 111.32;
+}
+
+function distanceToLinesKm(lng, lat, geometry) {
+  if (!geometry) return Infinity;
+  const lines = (geometry.type === 'LineString') ? [geometry.coordinates]
+              : (geometry.type === 'MultiLineString') ? geometry.coordinates : null;
+  if (!lines) return Infinity;
+  let best = Infinity;
+  for (const line of lines) {
+    for (let i = 1; i < line.length; i++) {
+      const d = segmentDistanceKm(lng, lat, line[i - 1][0], line[i - 1][1], line[i][0], line[i][1]);
+      if (d < best) { best = d; if (best === 0) return 0; }
+    }
+  }
+  return best;
+}
+
+// 表示中の災害レイヤーから、その地点に効いている情報を集める
+function hazardsAtPoint(p) {
+  const out = [];
+
+  if (map.hasLayer(quakeLayer)) {
+    quakeLayer.eachLayer(l => {
+      const f = l.feature;
+      if (f && pointInGeometry(p.lng, p.lat, f.geometry)) {
+        out.push({ cls: 'quake', label: '震度' + shindoLabel(f.properties.shindo), detail: f.properties.name });
+      }
+    });
+  }
+  if (map.hasLayer(volcanoLayer)) {
+    volcanoLayer.eachLayer(l => {
+      const f = l.feature;
+      if (!f || !pointInGeometry(p.lng, p.lat, f.geometry)) return;
+      const pr = f.properties || {};
+      const label = pr.kind === 'volcano' ? pr.warnName
+                  : pr.kind === 'stone' ? '小さな噴石の落下'
+                  : '降灰';
+      out.push({ cls: 'volcano', label: label, detail: pr.volcano });
+    });
+  }
+  if (map.hasLayer(floodLayer)) {
+    floodLayer.eachLayer(l => {
+      const f = l.feature;
+      if (!f || !pointInGeometry(p.lng, p.lat, f.geometry)) return;
+      const pr = f.properties || {};
+      out.push({ cls: 'flood', label: pr.warnName || '指定河川洪水予報', detail: pr.name + '（府県単位）' });
+    });
+  }
+  if (map.hasLayer(tsunamiLayer)) {
+    tsunamiLayer.eachLayer(l => {
+      const f = l.feature;
+      if (!f) return;
+      const d = distanceToLinesKm(p.lng, p.lat, f.geometry);
+      if (d <= TSUNAMI_NEAR_KM) {
+        out.push({ cls: 'tsunami', label: f.properties.warnName, detail: `${f.properties.name} まで約${d.toFixed(1)}km` });
+      }
+    });
+  }
+  return out;
+}
+
 function updatePointsInWarningList() {
   const countEl = document.getElementById('pointsInWarningCount');
   const container = document.getElementById('pointsInWarningList');
@@ -534,21 +685,16 @@ function updatePointsInWarningList() {
     if (f && featureMatchesFilters(f, levelSet, phenSet)) activeFeatures.push(f);
   });
 
-  container.innerHTML = '';
-  if (!activeFeatures.length) {
-    countEl.textContent = '0';
-    container.innerHTML = '<div class="muted-note">該当地点なし</div>';
-    return;
-  }
-
   const hits = [];
   getFilteredPoints().forEach(p => {
     const areas = activeFeatures
       .filter(f => pointInGeometry(p.lng, p.lat, f.geometry))
       .map(f => f.properties || {});
-    if (areas.length) hits.push({ point: p, areas });
+    const hazards = hazardsAtPoint(p);
+    if (areas.length || hazards.length) hits.push({ point: p, areas, hazards });
   });
 
+  container.innerHTML = '';
   countEl.textContent = String(hits.length);
   if (!hits.length) {
     container.innerHTML = '<div class="muted-note">該当地点なし</div>';
@@ -556,15 +702,29 @@ function updatePointsInWarningList() {
   }
 
   const LEVEL_RANK = { tokubetsu: 4, kiken: 3, keihou: 2, chuui: 1 };
-  hits.forEach(({ point, areas }) => {
+  const HAZARD_COLOR = { quake: '#ff9900', volcano: '#ff2800', flood: '#aa00aa', tsunami: '#b40068' };
+
+  hits.forEach(({ point, areas, hazards }) => {
     const types = [point.type1, point.type2, point.type3].filter(Boolean).join('/');
-    const topLevel = areas.reduce((acc, a) => (LEVEL_RANK[a.level] || 0) > (LEVEL_RANK[acc] || 0) ? a.level : acc, areas[0].level);
-    const levelLabel = LEVEL_LABEL[topLevel] || topLevel || '-';
-    const areaNames = Array.from(new Set(areas.map(a => a.name).filter(Boolean))).join('・') || '-';
-    const kinds = Array.from(new Set(areas.flatMap(a => Array.isArray(a.kinds) ? a.kinds : []))).join('、') || '-';
     const item = document.createElement('div');
     item.className = 'warn-point-item';
-    item.innerHTML = `<div class="h">${escapeHtml(point.name)}</div><div class="kv">${escapeHtml(types || '-')}・${escapeHtml(areaNames)}（${escapeHtml(levelLabel)}）</div><div class="kv">警報内容: ${escapeHtml(kinds)}</div>`;
+
+    let html = `<div class="h">${escapeHtml(point.name)}</div>`;
+    if (areas.length) {
+      const topLevel = areas.reduce((acc, a) => (LEVEL_RANK[a.level] || 0) > (LEVEL_RANK[acc] || 0) ? a.level : acc, areas[0].level);
+      const levelLabel = LEVEL_LABEL[topLevel] || topLevel || '-';
+      const areaNames = Array.from(new Set(areas.map(a => a.name).filter(Boolean))).join('・') || '-';
+      const kinds = Array.from(new Set(areas.flatMap(a => Array.isArray(a.kinds) ? a.kinds : []))).join('、') || '-';
+      html += `<div class="kv">${escapeHtml(types || '-')}・${escapeHtml(areaNames)}（${escapeHtml(levelLabel)}）</div>`;
+      html += `<div class="kv">警報内容: ${escapeHtml(kinds)}</div>`;
+    } else {
+      html += `<div class="kv">${escapeHtml(types || '-')}</div>`;
+    }
+    hazards.forEach(h => {
+      html += `<div class="kv"><span class="swatch" style="background:${HAZARD_COLOR[h.cls] || '#888'};"></span>`
+            + `${escapeHtml(h.label || '')}${h.detail ? '（' + escapeHtml(h.detail) + '）' : ''}</div>`;
+    });
+    item.innerHTML = html;
     item.addEventListener('click', () => {
       map.setView([point.lat, point.lng], Math.max(map.getZoom(), POINT_LABEL_MIN_ZOOM));
       if (point._marker) point._marker.openPopup();
@@ -616,13 +776,29 @@ fetch('api/status')
   .then(s => { if (s && Array.isArray(s.zoomTiers)) zoomTiers = s.zoomTiers; })
   .catch(() => {});
 
+// 表示範囲。近景ほど画面外が大半になるので、サーバに送らせない。
+// 遠景（全国が入る段）は絞り込む意味が無いうえ、少し動かすたびに取り直しになるので効かせない。
+const VIEWPORT_MIN_ZOOM = 8;
+
+function viewportBBox() {
+  if (map.getZoom() < VIEWPORT_MIN_ZOOM) return null;
+  const b = map.getBounds().pad(0.25);   // 端の欠けを防ぐため少し広めに要求する
+  return [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()];
+}
+
+function bboxQuery() {
+  const b = viewportBBox();
+  return b ? ('&bbox=' + b.map(v => v.toFixed(4)).join(',')) : '';
+}
+
 function fetchWarnings(args, fit) {
   lastArgs = args;
-  showLoading(true);
+  // 自動更新・ズーム追従では黙って取り直す（ボタンの表示が毎分ちらつくのを避ける）
+  if (fit) showLoading(true);
   return fetch('api/warnings', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(Object.assign({}, args, { zoom: map.getZoom() }))
+    body: JSON.stringify(Object.assign({}, args, { zoom: map.getZoom(), bbox: viewportBBox() }))
   })
     .then(r => {
       if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -649,6 +825,7 @@ function fetchWarnings(args, fit) {
         unresolved.removeAttribute('title');
       }
       lastTolerance = toleranceForZoom(map.getZoom());
+      lastFetchAt = Date.now();
       applyAvailability(res && res.available);
       document.getElementById('lastUpdate').querySelector('span:last-child').textContent = '最終更新: ' + new Date().toLocaleTimeString();
       if (fit) {
@@ -854,8 +1031,597 @@ function loadPoints() {
     });
 }
 
+// ================================
+// 6) 災害情報レイヤー（地震・震度／台風）
+// ================================
+// 警報とは別のレイヤーとして重ねる。地震の震度は警報と同じ境界データの
+// 市区町村ポリゴンに載るので、サーバ側の解決規則をそのまま使える。
+
+const quakeLayer = L.geoJSON([], {
+  attribution: '震度: 気象庁',
+  style: f => styleByShindo(f && f.properties ? f.properties.shindo : ''),
+  onEachFeature: (feature, layer) => {
+    const p = feature.properties || {};
+    layer.bindPopup(
+      `<div class="h">${escapeHtml(p.name || '')}（${escapeHtml(p.code || '')}）</div>
+       <div class="kv">震度 ${escapeHtml(p.shindo || '-')}</div>`,
+      { className: 'popup' });
+  }
+});
+const quakeMarkers = L.layerGroup();
+const typhoonLayer = L.layerGroup();
+
+// 気象庁の震度階級の配色
+const SHINDO_COLORS = {
+  '1': '#f2f2ff', '2': '#00aaff', '3': '#0041ff', '4': '#fae696',
+  '5-': '#ffe600', '5+': '#ff9900', '6-': '#ff2800', '6+': '#a50021', '7': '#b40068'
+};
+
+function styleByShindo(s) {
+  const c = SHINDO_COLORS[String(s || '').trim()] || '#c8c8cb';
+  return { color: c, weight: 1, fillColor: c, fillOpacity: 0.75 };
+}
+
+function shindoLabel(s) {
+  return String(s || '').replace('-', '弱').replace('+', '強');
+}
+
+let quakeItems = [];
+let currentEid = null;
+let quakeTolerance = null;
+
+function loadQuakeList() {
+  return fetch('api/quake?hours=24&max=20')
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(res => {
+      quakeItems = (res && Array.isArray(res.items)) ? res.items : [];
+      renderQuakeList();
+      if (quakeItems.length) showQuake(quakeItems[0].eid);
+      else showToast('直近24時間に震度の情報がある地震はありません。');
+    })
+    .catch(err => showToast('地震情報の取得に失敗しました: ' + (err && err.message ? err.message : err)));
+}
+
+function renderQuakeList() {
+  const box = document.getElementById('quakeList');
+  if (!quakeItems.length) {
+    box.innerHTML = '<div style="opacity:.7;">該当なし</div>';
+    return;
+  }
+  box.innerHTML = quakeItems.map(q => {
+    const t = (q.originTime || '').replace('T', ' ').slice(5, 16);
+    const sel = (q.eid === currentEid) ? ' style="background:rgba(120,170,255,.18);"' : '';
+    return `<div class="row quake-row" data-eid="${escapeHtml(q.eid)}"${sel}
+                 title="${escapeHtml(q.title || '')}">
+              <span class="swatch" style="background:${SHINDO_COLORS[q.maxInt] || '#c8c8cb'};"></span>
+              <span style="flex:1;">${escapeHtml(t)} ${escapeHtml(q.hypocenter || '')}</span>
+              <span style="opacity:.8;">M${escapeHtml(q.magnitude || '-')} / 震度${escapeHtml(shindoLabel(q.maxInt))}</span>
+            </div>`;
+  }).join('');
+  box.querySelectorAll('.quake-row').forEach(row => {
+    row.style.cursor = 'pointer';
+    row.addEventListener('click', () => showQuake(row.dataset.eid));
+  });
+}
+
+function showQuake(eid, fit) {
+  currentEid = eid;
+  renderQuakeList();
+  return fetch('api/quake/intensity', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ eid: eid, zoom: map.getZoom(), bbox: viewportBBox() })
+  })
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(res => {
+      quakeLayer.clearLayers();
+      quakeMarkers.clearLayers();
+      if (!res || !res.quake) return;
+      quakeLayer.addData(res);
+      quakeTolerance = toleranceForZoom(map.getZoom());
+
+      const q = res.quake;
+      if (typeof q.lat === 'number' && typeof q.lon === 'number') {
+        // 震源は「×」で示す（気象庁の震央表示にならう）
+        const icon = L.divIcon({
+          className: '',
+          html: '<div style="font:700 20px/20px system-ui; color:#fff; text-shadow:0 0 3px #000,0 0 6px #000;">✕</div>',
+          iconSize: [20, 20], iconAnchor: [10, 10]
+        });
+        L.marker([q.lat, q.lon], { icon: icon, title: q.hypocenter })
+          .bindPopup(`<div class="h">震源: ${escapeHtml(q.hypocenter || '-')}</div>
+                      <div class="kv">${escapeHtml((q.originTime || '').replace('T', ' ').slice(0, 16))}</div>
+                      <div class="kv">M${escapeHtml(q.magnitude || '-')} / 深さ ${escapeHtml(String(Math.round(q.depthKm || 0)))}km / 最大震度 ${escapeHtml(shindoLabel(q.maxInt))}</div>`,
+                     { className: 'popup' })
+          .addTo(quakeMarkers);
+      }
+      if (fit) {
+        try {
+          const b = quakeLayer.getBounds();
+          if (b.isValid()) map.fitBounds(b.pad(0.2));
+        } catch (_) {}
+      }
+      updatePointsInWarningList();
+      showToast(`地震: ${escapeHtml(q.hypocenter || '')} M${escapeHtml(q.magnitude || '-')} / 震度表示 ${res.features.length} 市区町村`);
+    })
+    .catch(err => showToast('震度の取得に失敗しました: ' + (err && err.message ? err.message : err)));
+}
+
+function loadTyphoons() {
+  return fetch('api/typhoon')
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(res => {
+      const items = (res && Array.isArray(res.items)) ? res.items : [];
+      typhoonLayer.clearLayers();
+      items.forEach(drawTyphoon);
+      renderTyphoonList(items);
+      showToast(items.length ? `台風・熱帯低気圧 ${items.length} 個を表示しました。`
+                             : '現在、発生中の台風はありません。');
+    })
+    .catch(err => showToast('台風情報の取得に失敗しました: ' + (err && err.message ? err.message : err)));
+}
+
+function drawTyphoon(t) {
+  const label = (t.nameJp ? `${t.category} ${t.nameJp}` : t.category) +
+                (t.number && /^\d+$/.test(t.number) ? `（第${Number(t.number) % 100}号）` : '');
+
+  // 実績経路：熱帯低気圧だった期間は細い破線、台風になってからは実線
+  if (t.trackPre && t.trackPre.length > 1) {
+    L.polyline(t.trackPre, { color: '#9fb6d4', weight: 2, dashArray: '4,4', opacity: .8 }).addTo(typhoonLayer);
+  }
+  if (t.trackTyphoon && t.trackTyphoon.length > 1) {
+    L.polyline(t.trackTyphoon, { color: '#ffffff', weight: 3, opacity: .9 }).addTo(typhoonLayer);
+  }
+
+  // 暴風警戒域
+  if (t.gale && t.gale.radius > 0) {
+    L.circle([t.gale.lat, t.gale.lon], {
+      radius: t.gale.radius, color: '#ff2800', weight: 2, fillColor: '#ff2800', fillOpacity: .18
+    }).bindPopup(`<div class="h">${escapeHtml(label)}</div><div class="kv">暴風警戒域</div>`, { className: 'popup' })
+      .addTo(typhoonLayer);
+  }
+
+  const pts = (t.points || []).slice().sort((a, b) => a.advancedHours - b.advancedHours);
+
+  // 予報円と、中心を結ぶ予報経路
+  const forecastPath = [];
+  pts.forEach(p => {
+    forecastPath.push([p.lat, p.lon]);
+    if (p.radius > 0) {
+      L.circle([p.lat, p.lon], {
+        radius: p.radius, color: '#ffd166', weight: 1.5, dashArray: '5,4',
+        fillColor: '#ffd166', fillOpacity: .10
+      }).bindPopup(`<div class="h">${escapeHtml(label)}</div>
+                    <div class="kv">${escapeHtml(p.part)}（${escapeHtml((p.validTime || '').replace('T', ' ').slice(5, 16))}）</div>
+                    <div class="kv">中心気圧 ${escapeHtml(p.pressure || '-')}hPa / 最大風速 ${escapeHtml(p.wind || '-')}m/s</div>`,
+                   { className: 'popup' })
+        .addTo(typhoonLayer);
+    }
+  });
+  if (forecastPath.length > 1) {
+    L.polyline(forecastPath, { color: '#ffd166', weight: 2, dashArray: '6,5', opacity: .9 }).addTo(typhoonLayer);
+  }
+
+  // 現在位置（実況）
+  const now = pts.find(p => p.advancedHours === 0) || pts[0];
+  if (now) {
+    const icon = L.divIcon({
+      className: '',
+      html: '<div style="font:700 18px/18px system-ui; color:#ff6b6b; text-shadow:0 0 3px #000,0 0 6px #000;">🌀</div>',
+      iconSize: [18, 18], iconAnchor: [9, 9]
+    });
+    L.marker([now.lat, now.lon], { icon: icon, title: label })
+      .bindPopup(`<div class="h">${escapeHtml(label)}</div>
+                  <div class="kv">${escapeHtml(now.location || '')} を ${escapeHtml(now.course || '-')} へ ${escapeHtml(now.speed || '-')}km/h</div>
+                  <div class="kv">中心気圧 ${escapeHtml(now.pressure || '-')}hPa / 最大風速 ${escapeHtml(now.wind || '-')}m/s（最大瞬間 ${escapeHtml(now.gust || '-')}m/s）</div>`,
+                 { className: 'popup' })
+      .addTo(typhoonLayer);
+  }
+}
+
+function renderTyphoonList(items) {
+  const box = document.getElementById('typhoonList');
+  if (!items.length) {
+    box.innerHTML = '<div style="opacity:.7;">発生中の台風はありません</div>';
+    return;
+  }
+  box.innerHTML = items.map(t => {
+    const now = (t.points || []).find(p => p.advancedHours === 0) || (t.points || [])[0] || {};
+    const name = t.nameJp ? `${t.category} ${escapeHtml(t.nameJp)}` : escapeHtml(t.category || t.id);
+    return `<div class="row" title="${escapeHtml(t.id)}">
+              <span style="flex:1;">${name}</span>
+              <span style="opacity:.8;">${escapeHtml(now.pressure || '-')}hPa</span>
+            </div>`;
+  }).join('');
+}
+
+function toggleLayer(on, layer, extraLayer) {
+  if (on) {
+    layer.addTo(map);
+    if (extraLayer) extraLayer.addTo(map);
+  } else {
+    map.removeLayer(layer);
+    if (extraLayer) map.removeLayer(extraLayer);
+  }
+  updatePointsInWarningList();   // 消したレイヤーぶんを地点一覧からも外す
+}
+
+document.getElementById('chkQuake').addEventListener('change', (e) => {
+  const on = !!e.target.checked;
+  document.getElementById('quakePanel').style.display = on ? '' : 'none';
+  document.getElementById('shindoLegend').style.display = on ? '' : 'none';
+  toggleLayer(on, quakeLayer, quakeMarkers);
+  if (on && !quakeItems.length) loadQuakeList();
+});
+
+document.getElementById('chkTyphoon').addEventListener('change', (e) => {
+  const on = !!e.target.checked;
+  document.getElementById('typhoonPanel').style.display = on ? '' : 'none';
+  toggleLayer(on, typhoonLayer);
+  if (on) loadTyphoons();
+});
+
+// チップ全体のクリックでチェックを切り替える（他のフィルタと同じ操作感にする）
+document.querySelectorAll('[data-layer]').forEach(ch => {
+  const input = ch.querySelector('input');
+  ch.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    input.checked = !input.checked;
+    ch.dataset.active = String(input.checked);
+    input.dispatchEvent(new Event('change', { bubbles: false }));
+  });
+});
+
+// 震度ポリゴンも、ズーム段が変わったらその精度で取り直す
+map.on('zoomend', () => {
+  if (!currentEid || !zoomTiers || !map.hasLayer(quakeLayer)) return;
+  const tol = toleranceForZoom(map.getZoom());
+  if (tol === quakeTolerance) return;
+  setTimeout(() => {
+    if (toleranceForZoom(map.getZoom()) !== quakeTolerance) showQuake(currentEid, false);
+  }, 400);
+});
+
+// ================================
+// 7) 噴火警報・降灰予報／指定河川洪水予報
+// ================================
+// どちらも警報フィード（map.json）には含まれない別系統の情報。
+// 噴火・降灰は市町村コードで来るので警報と同じポリゴンに塗れる。
+// 洪水は電文に市町村コードが無く、結合できるのは府県予報区コードだけ。
+
+const VOLCANO_COLORS = {
+  '01': '#b40068',   // 噴火警報（居住地域）＝特別警報相当
+  '02': '#ff2800',   // 火口周辺警報
+  '03': '#ff9900'    // 噴火警報（周辺海域）
+};
+const ASH_COLORS = { ash: '#a08060', stone: '#6b3a1a' };
+const FLOOD_COLORS = { 5: '#0c000c', 4: '#aa00aa', 3: '#ff2800', 2: '#f2e700' };
+
+function styleByHazard(p) {
+  p = p || {};
+  if (p.kind === 'volcano') {
+    const c = VOLCANO_COLORS[p.warnCode] || '#ff9900';
+    return { color: c, weight: 2, fillColor: c, fillOpacity: 0.55 };
+  }
+  if (p.kind === 'ash')   return { color: ASH_COLORS.ash, weight: 1, fillColor: ASH_COLORS.ash, fillOpacity: 0.45 };
+  if (p.kind === 'stone') return { color: ASH_COLORS.stone, weight: 2, fillColor: ASH_COLORS.stone, fillOpacity: 0.6 };
+  if (p.kind === 'flood') {
+    const c = FLOOD_COLORS[p.level] || '#3388ff';
+    return { color: c, weight: 2, fillColor: c, fillOpacity: 0.4, dashArray: '6,4' };
+  }
+  return { color: '#c8c8cb', weight: 1, fillColor: '#c8c8cb', fillOpacity: 0.4 };
+}
+
+function hazardPopup(f) {
+  const p = f.properties || {};
+  const name = escapeHtml(p.name || '');
+  if (p.kind === 'volcano') {
+    return `<div class="h">${escapeHtml(p.volcano || '')}</div>
+            <div class="kv">${escapeHtml(p.warnName || '')}（${escapeHtml(p.levelName || '')}）</div>
+            <div class="kv">対象: ${name}</div>`;
+  }
+  if (p.kind === 'ash' || p.kind === 'stone') {
+    const what = (p.kind === 'ash') ? '降灰が予想される地域' : '小さな噴石の落下が予想される地域';
+    return `<div class="h">${escapeHtml(p.volcano || '')}</div>
+            <div class="kv">${what}</div>
+            <div class="kv">対象: ${name}</div>`;
+  }
+  if (p.kind === 'flood') {
+    return `<div class="h">${name}</div>
+            <div class="kv">指定河川洪水予報 ${escapeHtml(p.warnName || '')}</div>
+            <div class="kv" style="opacity:.75;">※河川区間の形状は気象庁が配布していないため府県単位の表示です</div>`;
+  }
+  return `<div class="h">${name}</div>`;
+}
+
+function makeHazardLayer(attribution) {
+  return L.geoJSON([], {
+    attribution: attribution,
+    style: f => styleByHazard(f && f.properties),
+    onEachFeature: (feature, layer) => layer.bindPopup(hazardPopup(feature), { className: 'popup' })
+  });
+}
+
+const volcanoLayer = makeHazardLayer('噴火警報・降灰予報: 気象庁');
+const volcanoMarkers = L.layerGroup();
+const floodLayer = makeHazardLayer('指定河川洪水予報: 気象庁');
+
+let volcanoTolerance = null;
+let floodTolerance = null;
+
+function loadVolcano(fit) {
+  return fetch('api/volcano?zoom=' + map.getZoom() + bboxQuery())
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(res => {
+      volcanoLayer.clearLayers();
+      volcanoMarkers.clearLayers();
+      volcanoLayer.addData(res);
+      volcanoTolerance = toleranceForZoom(map.getZoom());
+
+      const warns = (res && res.warnings) || [];
+      const ash = (res && res.ash) || [];
+      ash.forEach(a => {
+        if (typeof a.lat !== 'number' || typeof a.lon !== 'number') return;
+        const icon = L.divIcon({
+          className: '',
+          html: '<div style="font:700 16px/16px system-ui; color:#ffb37a; text-shadow:0 0 3px #000,0 0 6px #000;">▲</div>',
+          iconSize: [16, 16], iconAnchor: [8, 8]
+        });
+        L.marker([a.lat, a.lon], { icon: icon, title: a.volcano })
+          .bindPopup(`<div class="h">${escapeHtml(a.volcano || '')}</div>
+                      <div class="kv">${escapeHtml(a.headline || '')}</div>`, { className: 'popup' })
+          .addTo(volcanoMarkers);
+      });
+      renderVolcanoList(warns, ash);
+      updatePointsInWarningList();
+      if (fit) showToast(`噴火警報 ${warns.length} 件 / 降灰予報 ${ash.length} 火山`);
+    })
+    .catch(err => showToast('火山情報の取得に失敗しました: ' + (err && err.message ? err.message : err)));
+}
+
+function renderVolcanoList(warns, ash) {
+  const box = document.getElementById('volcanoList');
+  const parts = [];
+  if (warns.length) {
+    parts.push('<div style="font-size:11px; opacity:.75; margin:2px 0;">噴火警報</div>');
+    parts.push(warns.map(v => `<div class="row">
+        <span class="swatch" style="background:${VOLCANO_COLORS[v.warnCode] || '#ff9900'};"></span>
+        <span style="flex:1;">${escapeHtml(v.volcano || '')}</span>
+        <span style="opacity:.8;">${escapeHtml(v.levelName || v.warnName || '')}</span>
+      </div>`).join(''));
+  }
+  if (ash.length) {
+    parts.push('<div style="font-size:11px; opacity:.75; margin:6px 0 2px;">降灰予報</div>');
+    parts.push(ash.map(a => `<div class="row" title="${escapeHtml(a.headline || '')}">
+        <span class="swatch" style="background:${ASH_COLORS.ash};"></span>
+        <span style="flex:1;">${escapeHtml(a.volcano || '')}</span>
+        <span style="opacity:.8;">降灰${a.ashAreas} / 噴石${a.stoneAreas}</span>
+      </div>`).join(''));
+  }
+  box.innerHTML = parts.length ? parts.join('') : '<div style="opacity:.7;">発表中の噴火警報・降灰予報はありません</div>';
+}
+
+function loadFlood(fit) {
+  return fetch('api/flood?zoom=' + map.getZoom() + bboxQuery())
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(res => {
+      floodLayer.clearLayers();
+      floodLayer.addData(res);
+      floodTolerance = toleranceForZoom(map.getZoom());
+      const rivers = (res && res.rivers) || [];
+      renderFloodList(rivers);
+      updatePointsInWarningList();
+      const active = rivers.filter(r => !r.cleared).length;
+      if (fit) {
+        showToast(active ? `指定河川洪水予報: ${active} 河川が発表中`
+                         : '指定河川洪水予報は現在発表されていません。');
+      }
+    })
+    .catch(err => showToast('河川洪水予報の取得に失敗しました: ' + (err && err.message ? err.message : err)));
+}
+
+function renderFloodList(rivers) {
+  const box = document.getElementById('floodList');
+  const active = rivers.filter(r => !r.cleared);
+  const cleared = rivers.filter(r => r.cleared);
+  const parts = [];
+
+  if (active.length) {
+    parts.push(active.map(r => `<div class="row" title="${escapeHtml((r.sections || []).join(' / '))}">
+        <span class="swatch" style="background:${FLOOD_COLORS[r.level] || '#3388ff'};"></span>
+        <span style="flex:1;">${escapeHtml(r.river || '')}</span>
+        <span style="opacity:.85;">レベル${r.level}</span>
+      </div>`).join(''));
+  } else {
+    parts.push('<div style="opacity:.7;">発表中の河川はありません</div>');
+  }
+  if (cleared.length) {
+    parts.push('<div style="font-size:11px; opacity:.6; margin:6px 0 2px;">直近に解除</div>');
+    parts.push(cleared.map(r => `<div class="row" style="opacity:.55;" title="${escapeHtml(r.headline || '')}">
+        <span style="flex:1;">${escapeHtml(r.river || '')}</span>
+        <span>${escapeHtml((r.reportedAt || '').replace('T', ' ').slice(5, 16))}</span>
+      </div>`).join(''));
+  }
+  parts.push(`<div style="font-size:11px; opacity:.6; margin-top:6px;">
+      河川区間の形状は気象庁が配布していないため、府県単位で塗っています。</div>`);
+  box.innerHTML = parts.join('');
+}
+
+document.getElementById('chkVolcano').addEventListener('change', (e) => {
+  const on = !!e.target.checked;
+  document.getElementById('volcanoPanel').style.display = on ? '' : 'none';
+  document.getElementById('volcanoLegend').style.display = on ? '' : 'none';
+  toggleLayer(on, volcanoLayer, volcanoMarkers);
+  if (on) loadVolcano(true);
+});
+
+document.getElementById('chkFlood').addEventListener('change', (e) => {
+  const on = !!e.target.checked;
+  document.getElementById('floodPanel').style.display = on ? '' : 'none';
+  document.getElementById('floodLegend').style.display = on ? '' : 'none';
+  toggleLayer(on, floodLayer);
+  if (on) loadFlood(true);
+});
+
+// これらもズーム段が変わったら取り直す
+map.on('zoomend', () => {
+  if (!zoomTiers) return;
+  const tol = toleranceForZoom(map.getZoom());
+  if (map.hasLayer(volcanoLayer) && tol !== volcanoTolerance) {
+    setTimeout(() => { if (toleranceForZoom(map.getZoom()) !== volcanoTolerance) loadVolcano(false); }, 400);
+  }
+  if (map.hasLayer(floodLayer) && tol !== floodTolerance) {
+    setTimeout(() => { if (toleranceForZoom(map.getZoom()) !== floodTolerance) loadFlood(false); }, 400);
+  }
+});
+
+// ================================
+// 8) 津波警報・注意報（海岸線）
+// ================================
+// 津波予報区は3桁コードの「線」データ（気象庁GISもポリゴンではなく海岸線で配布）。
+// 面ではなく線として描く。
+
+const TSUNAMI_COLORS = { 3: '#b40068', 2: '#ff2800', 1: '#f2e700' };
+
+const tsunamiLayer = L.geoJSON([], {
+  attribution: '津波警報・注意報: 気象庁',
+  style: f => {
+    const p = (f && f.properties) || {};
+    return { color: TSUNAMI_COLORS[p.rank] || '#3388ff', weight: 5, opacity: 0.95 };
+  },
+  onEachFeature: (feature, layer) => {
+    const p = feature.properties || {};
+    layer.bindPopup(`<div class="h">${escapeHtml(p.name || '')}</div>
+                     <div class="kv">${escapeHtml(p.warnName || '')}</div>
+                     <div class="kv">予想の高さ: ${escapeHtml(p.maxHeight || '-')}m ／ ${escapeHtml(p.firstHeight || '-')}</div>`,
+                    { className: 'popup' });
+  }
+});
+
+let tsunamiTolerance = null;
+
+function loadTsunami(fit) {
+  return fetch('api/tsunami?zoom=' + map.getZoom() + bboxQuery())
+    .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+    .then(res => {
+      tsunamiLayer.clearLayers();
+      tsunamiLayer.addData(res);
+      tsunamiTolerance = toleranceForZoom(map.getZoom());
+      renderTsunamiList(res);
+      updatePointsInWarningList();
+      if (res && res.dataError) showToast('津波予報区データ: ' + res.dataError);
+      else if (fit) {
+        const n = (res.features || []).length;
+        showToast(n ? `津波警報・注意報: ${n} 予報区` : '津波警報・注意報は発表されていません。');
+      }
+    })
+    .catch(err => showToast('津波情報の取得に失敗しました: ' + (err && err.message ? err.message : err)));
+}
+
+function renderTsunamiList(res) {
+  const box = document.getElementById('tsunamiList');
+  const rep = (res && res.report) || {};
+  const areas = (rep.areas || []).filter(a => a.rank > 0);
+  const parts = [];
+
+  if (areas.length) {
+    parts.push(areas.map(a => `<div class="row">
+        <span class="swatch" style="background:${TSUNAMI_COLORS[a.rank] || '#3388ff'};"></span>
+        <span style="flex:1;">${escapeHtml(a.name || '')}</span>
+        <span style="opacity:.85;">${escapeHtml(a.warnName || '')}</span>
+      </div>`).join(''));
+  } else {
+    parts.push('<div style="opacity:.7;">発表中の津波警報・注意報はありません</div>');
+  }
+  if (rep.title) {
+    parts.push(`<div style="font-size:11px; opacity:.6; margin-top:6px;">
+        最新報: ${escapeHtml(rep.title)}（${escapeHtml((rep.reportedAt || '').replace('T', ' ').slice(0, 16))}）<br>
+        震源: ${escapeHtml(rep.hypocenter || '-')} M${escapeHtml(rep.magnitude || '-')}</div>`);
+  }
+  box.innerHTML = parts.join('');
+}
+
+document.getElementById('chkTsunami').addEventListener('change', (e) => {
+  const on = !!e.target.checked;
+  document.getElementById('tsunamiPanel').style.display = on ? '' : 'none';
+  document.getElementById('tsunamiLegend').style.display = on ? '' : 'none';
+  toggleLayer(on, tsunamiLayer);
+  if (on) loadTsunami(true);
+});
+
+map.on('zoomend', () => {
+  if (!zoomTiers || !map.hasLayer(tsunamiLayer)) return;
+  if (toleranceForZoom(map.getZoom()) === tsunamiTolerance) return;
+  setTimeout(() => {
+    if (toleranceForZoom(map.getZoom()) !== tsunamiTolerance) loadTsunami(false);
+  }, 400);
+});
+
+// ================================
+// 9) 自動更新と表示範囲への追従
+// ================================
+// 警報は数分単位で変わるので、表示中のレイヤーを一定間隔で取り直す。
+// 取得が重なると無駄なので、前の取得が終わるまで次を出さない。
+
+const AUTO_INTERVAL_MS = 60000;
+let lastFetchAt = null;
+let refreshing = false;
+
+function refreshActiveLayers(fit) {
+  if (refreshing) return Promise.resolve();
+  refreshing = true;
+
+  const jobs = [];
+  if (lastArgs) jobs.push(fetchWarnings(lastArgs, fit));
+  if (map.hasLayer(quakeLayer) && currentEid) jobs.push(showQuake(currentEid, false));
+  if (map.hasLayer(volcanoLayer)) jobs.push(loadVolcano(false));
+  if (map.hasLayer(floodLayer)) jobs.push(loadFlood(false));
+  if (map.hasLayer(tsunamiLayer)) jobs.push(loadTsunami(false));
+  if (map.hasLayer(typhoonLayer)) jobs.push(loadTyphoons());
+
+  if (!jobs.length) { refreshing = false; return Promise.resolve(); }
+  return Promise.all(jobs)
+    .then(() => { lastFetchAt = Date.now(); })
+    .catch(() => {})
+    .then(() => { refreshing = false; });
+}
+
+function renderAge() {
+  const el = document.getElementById('autoAge');
+  if (!el) return;
+  if (!lastFetchAt) { el.textContent = '未取得'; return; }
+  const sec = Math.round((Date.now() - lastFetchAt) / 1000);
+  const auto = document.getElementById('chkAuto').checked;
+  el.textContent = (sec < 60 ? `${sec}秒前` : `${Math.floor(sec / 60)}分${sec % 60}秒前`)
+                 + (auto ? '' : '（自動更新オフ）');
+  // 更新が滞っていることが一目で分かるようにする
+  el.style.color = (auto && sec > AUTO_INTERVAL_MS / 1000 * 2.5) ? '#ffb37a' : '';
+}
+setInterval(renderAge, 1000);
+
+setInterval(() => {
+  if (!document.getElementById('chkAuto').checked) return;
+  if (document.hidden) return;      // 裏に回っている間は取りに行かない
+  refreshActiveLayers(false);
+}, AUTO_INTERVAL_MS);
+
+document.getElementById('chkAuto').addEventListener('change', () => {
+  renderAge();
+  if (document.getElementById('chkAuto').checked) refreshActiveLayers(false);
+});
+
+// 表示範囲で絞り込んでいる間は、地図を動かしたら取り直す（画面外を送っていないため）
+let moveTimer = null;
+map.on('moveend', () => {
+  if (map.getZoom() < VIEWPORT_MIN_ZOOM) return;
+  if (moveTimer) clearTimeout(moveTimer);
+  moveTimer = setTimeout(() => refreshActiveLayers(false), 500);
+});
+
 // 初期化
 showToast('右パネルの「最新を取得」で気象庁の最新の警報・注意報を表示します。');
+renderAge();
 document.getElementById('zoom').textContent = map.getZoom();
 updatePointLabelVisibility();
 loadPoints();

@@ -24,6 +24,7 @@ echo Building JmaMap.exe ...
   /r:System.Drawing.dll ^
   /r:System.Windows.Forms.dll ^
   /r:System.Numerics.dll ^
+  /r:System.Xml.dll ^
   "%~dp0src\*.cs" ^
   "%~dp0geotool\Simplify.cs" ^
   "%~dp0geotool\CoordWriter.cs"

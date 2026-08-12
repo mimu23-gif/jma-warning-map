@@ -6,6 +6,8 @@
   "dataDir": "../data/boundaries",
   "pointsCsv": "../data/points.csv",
   "indexCache": "region-index-local.json",
+  "_tsunamiGeoJson": "津波予報区は3桁コードの線データ。6/7桁前提の索引に載らないので単独ファイルで持つ",
+  "tsunamiGeoJson": "../data/boundaries/tsunami/tsunami_area.geojson",
   "geoCacheFiles": 8,
   "_zoomTolerances": "[最大ズーム, 許容誤差(度)] の並び。遠景ほど大きく間引く。0 は同梱データそのまま",
   "zoomTolerances": [

@@ -315,6 +315,115 @@ namespace JmaMap
 
                 int head = Math.Min(json.Length, 400);
                 say("先頭: " + json.Substring(0, head));
+
+                // 併記する災害情報（警報とは別レイヤー）
+                sw = Stopwatch.StartNew();
+                System.Collections.Generic.List<QuakeItem> quakes = Disaster.GetRecentQuakes(24, 20);
+                sw.Stop();
+                say("地震: 直近24時間で " + quakes.Count.ToString(CultureInfo.InvariantCulture) + " 件 ("
+                    + sw.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture) + " ms)");
+                for (int i = 0; i < quakes.Count && i < 3; i++)
+                {
+                    QuakeItem q = quakes[i];
+                    say("  " + q.OriginTime + " " + q.Hypocenter + " M" + q.Magnitude
+                        + " 最大震度" + q.MaxInt + " 市区町村" + q.Cities.Count.ToString(CultureInfo.InvariantCulture) + "件");
+                }
+                if (quakes.Count > 0)
+                {
+                    sw = Stopwatch.StartNew();
+                    var qw = new StringWriter();
+                    srv.WriteQuakeIntensity(qw, quakes[0], 0);
+                    sw.Stop();
+                    string qjson = qw.ToString();
+                    say("震度の応答: " + (qjson.Length / 1024).ToString(CultureInfo.InvariantCulture) + " KB, "
+                        + CountOccurrences(qjson, "\"type\":\"Feature\"").ToString(CultureInfo.InvariantCulture) + " features, "
+                        + "未解決 " + CountOccurrences(qjson, "\"reason\":").ToString(CultureInfo.InvariantCulture) + " 件 ("
+                        + sw.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture) + " ms)");
+                }
+
+                sw = Stopwatch.StartNew();
+                System.Collections.Generic.List<TyphoonItem> typhoons = Disaster.GetTyphoons();
+                sw.Stop();
+                say("台風: " + typhoons.Count.ToString(CultureInfo.InvariantCulture) + " 個 ("
+                    + sw.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture) + " ms)");
+                for (int i = 0; i < typhoons.Count; i++)
+                {
+                    TyphoonItem t = typhoons[i];
+                    say("  " + t.Id + " " + t.Category + " " + t.NameJp
+                        + " 実績" + t.TrackTyphoon.Count.ToString(CultureInfo.InvariantCulture) + "点"
+                        + " 予報" + t.Points.Count.ToString(CultureInfo.InvariantCulture) + "点"
+                        + (t.HasGale ? " 暴風警戒域あり" : ""));
+                }
+                sw = Stopwatch.StartNew();
+                System.Collections.Generic.List<VolcanoWarn> volcanoes = Hazards.GetVolcanoWarnings();
+                sw.Stop();
+                say("噴火警報: " + volcanoes.Count.ToString(CultureInfo.InvariantCulture) + " 件 ("
+                    + sw.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture) + " ms)");
+                for (int i = 0; i < volcanoes.Count && i < 4; i++)
+                {
+                    VolcanoWarn v = volcanoes[i];
+                    say("  " + v.VolcanoName + " " + v.KindName + "(" + v.KindCode + ") "
+                        + v.LevelName + " 市町村" + v.Municipalities.Count.ToString(CultureInfo.InvariantCulture) + "件");
+                }
+
+                sw = Stopwatch.StartNew();
+                System.Collections.Generic.List<AshFall> ashes = Hazards.GetAshFalls(40);
+                sw.Stop();
+                say("降灰予報: " + ashes.Count.ToString(CultureInfo.InvariantCulture) + " 火山 ("
+                    + sw.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture) + " ms)");
+                for (int i = 0; i < ashes.Count && i < 4; i++)
+                {
+                    AshFall a = ashes[i];
+                    say("  " + a.VolcanoName + " 降灰" + a.Ash.Count.ToString(CultureInfo.InvariantCulture)
+                        + "市町村 / 噴石" + a.Stone.Count.ToString(CultureInfo.InvariantCulture) + "市町村");
+                }
+
+                sw = Stopwatch.StartNew();
+                System.Collections.Generic.List<FloodWarn> floods = Hazards.GetFloodWarnings(60);
+                sw.Stop();
+                int active = 0;
+                for (int i = 0; i < floods.Count; i++) { if (!floods[i].Cleared) active++; }
+                say("指定河川洪水予報: 発表中 " + active.ToString(CultureInfo.InvariantCulture)
+                    + " 河川 / 直近の報がある河川 " + floods.Count.ToString(CultureInfo.InvariantCulture) + " ("
+                    + sw.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture) + " ms)");
+                for (int i = 0; i < floods.Count && i < 6; i++)
+                {
+                    FloodWarn f = floods[i];
+                    // 洪水は府県予報区コードでしか塗れないので、その解決可否をここで確かめておく
+                    var resolved = new System.Collections.Generic.List<string>();
+                    for (int p = 0; p < f.PrefCodes.Count; p++)
+                    {
+                        IndexEntry hit = idx.Find(f.PrefCodes[p], false);
+                        resolved.Add(f.PrefCodes[p] + (hit != null ? "→OK" : "→未解決"));
+                    }
+                    say("  " + (f.Cleared ? "[解除] " : "[発表中] ") + f.RiverName
+                        + " レベル" + f.Level.ToString(CultureInfo.InvariantCulture)
+                        + " " + f.KindName + " 府県=" + string.Join(",", f.PrefNames.ToArray())
+                        + " 塗り先=" + string.Join(",", resolved.ToArray())
+                        + " 区間" + f.Sections.Count.ToString(CultureInfo.InvariantCulture) + "件");
+                }
+
+                sw = Stopwatch.StartNew();
+                TsunamiReport ts = Hazards.GetTsunami();
+                sw.Stop();
+                int tsActive = 0;
+                for (int i = 0; i < ts.Areas.Count; i++) { if (Hazards.TsunamiRank(ts.Areas[i].KindName) > 0) tsActive++; }
+                say("津波: " + (ts.Cleared ? "発表なし" : "発表中")
+                    + " / 区域" + ts.Areas.Count.ToString(CultureInfo.InvariantCulture)
+                    + "（うち警報・注意報 " + tsActive.ToString(CultureInfo.InvariantCulture) + "）"
+                    + " 最新報=" + ts.Title + " " + ts.ReportedAt
+                    + " (" + sw.ElapsedMilliseconds.ToString(CultureInfo.InvariantCulture) + " ms)");
+                for (int i = 0; i < ts.Areas.Count && i < 4; i++)
+                {
+                    TsunamiArea a = ts.Areas[i];
+                    say("  " + a.Code + " " + a.Name + " " + a.KindName);
+                }
+                // 発表が無いときでも、海岸線データを引けること自体は確かめておく
+                var probe = new System.Collections.Generic.List<string>();
+                for (int i = 0; i < ts.Areas.Count && probe.Count < 2; i++) probe.Add(ts.Areas[i].Code);
+                if (probe.Count == 0) { probe.Add("100"); probe.Add("712"); }
+                say("  津波予報区データ: " + srv.CheckTsunamiData(probe, 0.003));
+
                 say("== 正常終了 ==");
             }
             catch (Exception ex)

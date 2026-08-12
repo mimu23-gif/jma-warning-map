@@ -19,6 +19,10 @@ namespace JmaMap
         public int GeoCacheFiles = 8;
         public List<string> GeoFolders = new List<string>();
 
+        // 津波予報区は3桁コードの線データで、6/7桁前提の索引には載らない。
+        // 単独ファイルとして持ち、コードは原文のまま突き合わせる。
+        public string TsunamiGeoJson = "../data/boundaries/tsunami/tsunami_area.geojson";
+
         // ズーム別の簡略化の許容誤差（度）。maxZoom 以下ならその tolerance を使う。
         // 遠景ほど大きく間引き、近景は同梱データそのまま（tolerance = 0）を送る。
         public List<double[]> ZoomTolerances = new List<double[]>();   // [maxZoom, tolerance]
@@ -56,6 +60,8 @@ namespace JmaMap
                 if (p.Length > 0) s.PointsCsvPath = p;
                 string ic = Json.GetStr(root, "indexCache").Trim();
                 if (ic.Length > 0) s.IndexCachePath = ic;
+                string tg = Json.GetStr(root, "tsunamiGeoJson").Trim();
+                if (tg.Length > 0) s.TsunamiGeoJson = tg;
 
                 var zoom = Json.Arr(Json.Get(root, "zoomTolerances"));
                 if (zoom != null && zoom.Count > 0)
