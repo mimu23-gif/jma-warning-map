@@ -7,8 +7,9 @@
 **本体は C# 版（[`csharp/`](csharp/)）です。** Windowsに最初から入っているものだけで動き、
 インストール・管理者権限・追加ランタイム・Googleアカウントのいずれも要りません。
 
-元はGoogle Apps Script（GAS）のWebアプリとして作ったもので、同じ画面とロジックのGAS版を
-[`gas/`](gas/) に残してあります（→ [GAS版](#gas版googleアカウントで共有したい場合)）。
+元はGoogle Apps Script（GAS）のWebアプリとして作ったもので、GAS版を [`gas/`](gas/) に
+残してあります。ただしGAS版は**警報表示のみの簡易版**で、災害情報レイヤーはC#版だけの機能です
+（→ [GAS版](#gas版警報のみの簡易版)）。
 
 ## クイックスタート
 
@@ -207,10 +208,21 @@ available: { levels: ['chuui', 'keihou'], codes: ['05','07','08','10','14','15',
 - C#版: [data/points.csv](data/points.csv)（場所は `settings.json` の `pointsCsv`）
 - GAS版: Googleスプレッドシートの1シート（[gas/Points.js](gas/Points.js) の `POINTS_CFG` / `POINTS_HEADER_ALIASES` 参照）
 
-## GAS版（Googleアカウントで共有したい場合）
+## GAS版（警報のみの簡易版）
 
-同じ画面とロジックのGoogle Apps Script版を [`gas/`](gas/) に残しています。URLを配って
-複数人に見せたい場合や、Windows以外から使いたい場合はこちらです。
+Google Apps Script版を [`gas/`](gas/) に残しています。URLを配って複数人に見せたい場合や、
+Windows以外から使いたい場合はこちらです。
+
+> **機能はC#版と同じではありません。** GAS版が扱うのは**気象警報・注意報とPOIだけ**で、
+> 地震・台風・噴火・降灰・河川氾濫・津波の各レイヤーはC#版にしかありません。
+> 自動更新・ビューポート絞り込みも同様です。
+>
+> 追従させていないのは技術的な理由です。災害情報の多くは防災情報XML（Atomフィード＋個別電文）
+> から取るため、1回の描画で数十件のHTTP取得が要り、GASの**6分の実行時間制限**と
+> `CacheService` の**95KB上限**に収まりません。津波の海岸線データ（24.7MB）も
+> Drive経由では扱いが重くなります。
+>
+> 警報表示だけで足りるならGAS版で十分です。災害情報も必要ならC#版を使ってください。
 
 | ファイル | 役割 |
 |---|---|
@@ -226,16 +238,22 @@ available: { levels: ['chuui', 'keihou'], codes: ['05','07','08','10','14','15',
 
 ### C#版との対応
 
-| C#版（本体） | GAS版 |
-|---|---|
-| `HttpListener` が `web/map.html` を返す | `doGet()` / `HtmlService` |
-| `fetch()` | `google.script.run` |
-| ローカルフォルダの直読み（起動時に索引を構築・キャッシュ） | `DriveApp` + `region-index.json`（DriveファイルID） |
-| `data/points.csv` | `SpreadsheetApp` |
-| メモリ上のキャッシュ | `CacheService`（95KB上限） |
-| [csharp/settings.json](csharp/settings.json) | `PropertiesService`（Script Properties） |
-| ローカル単独実行のため不要 | `assertOwner_()` |
-| 実行時間の制限なし | 6分の実行時間制限 |
+| | C#版（本体） | GAS版 |
+|---|---|---|
+| 画面 | `HttpListener` が `web/map.html` を返す | `doGet()` / `HtmlService` |
+| 呼び出し | `fetch()` | `google.script.run` |
+| 境界データ | ローカルフォルダの直読み（起動時に索引を構築・キャッシュ） | `DriveApp` + `region-index.json`（DriveファイルID） |
+| POI | `data/points.csv` | `SpreadsheetApp` |
+| キャッシュ | メモリ上（上限なし） | `CacheService`（95KB上限） |
+| 設定 | [csharp/settings.json](csharp/settings.json) | `PropertiesService`（Script Properties） |
+| 権限 | ローカル単独実行のため不要 | `assertOwner_()` |
+| 実行時間 | 制限なし | 6分 |
+| 気象警報・注意報 | ✅ | ✅ |
+| POI表示・警報との突き合わせ | ✅ | ✅ |
+| 発表中の種別だけをフィルタ表示 | ✅ | ✅ |
+| ズーム連動の詳細度（LOD） | ✅ | — |
+| 地震・台風・噴火・降灰・河川氾濫・津波 | ✅ | — |
+| 自動更新・ビューポート絞り込み | ✅ | — |
 
 地域コードの6桁/7桁正規化、`class10s` の子コード展開、政令市の親コードへのフォールバック、
 レベル判定といったロジックは両版で同じ規則です。索引も同じ188ファイルを同じ規則で走査するため、

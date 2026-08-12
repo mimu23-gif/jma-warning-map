@@ -332,6 +332,44 @@ namespace JmaMap
             public WarnItem Item;
         }
 
+        /// <summary>
+        /// GeoJSONファイル1つぶんの「コード → フィーチャ」索引。
+        /// 7桁一致を優先し、外れたら先頭6桁で代表フィーチャを拾う（Code.js と同じ規則）。
+        /// </summary>
+        class CodeMap
+        {
+            readonly Dictionary<string, FeatureRef> map7 = new Dictionary<string, FeatureRef>(StringComparer.Ordinal);
+            readonly Dictionary<string, FeatureRef> map6 = new Dictionary<string, FeatureRef>(StringComparer.Ordinal);
+
+            public CodeMap(GeoFile gf)
+            {
+                for (int f = 0; f < gf.Features.Count; f++)
+                {
+                    FeatureRef fr = gf.Features[f];
+                    if (!GeoJson.HasGeometry(fr)) continue;
+                    string propCode = GeoIndex.NormalizeCode(fr.Code);
+                    if (propCode.Length == 7)
+                    {
+                        if (!map7.ContainsKey(propCode)) map7[propCode] = fr;
+                        string h6 = propCode.Substring(0, 6);
+                        if (!map6.ContainsKey(h6)) map6[h6] = fr;
+                    }
+                    else if (propCode.Length == 6)
+                    {
+                        if (!map6.ContainsKey(propCode)) map6[propCode] = fr;
+                    }
+                }
+            }
+
+            public FeatureRef Find(string key)
+            {
+                FeatureRef ft;
+                if (map7.TryGetValue(key, out ft)) return ft;
+                if (map6.TryGetValue(Head6(key), out ft)) return ft;
+                return null;
+            }
+        }
+
         void ServeWarnings(HttpListenerContext ctx)
         {
             HashSet<string> levels = null;
@@ -477,34 +515,12 @@ namespace JmaMap
                     continue;
                 }
 
-                // コード → フィーチャ の索引を作る（7桁一致を優先し、外れたら6桁で拾う）
-                var map7 = new Dictionary<string, FeatureRef>(StringComparer.Ordinal);
-                var map6 = new Dictionary<string, FeatureRef>(StringComparer.Ordinal);
-                for (int f = 0; f < gf.Features.Count; f++)
-                {
-                    FeatureRef fr = gf.Features[f];
-                    if (!GeoJson.HasGeometry(fr)) continue;
-                    string propCode = GeoIndex.NormalizeCode(fr.Code);
-                    if (propCode.Length == 7)
-                    {
-                        if (!map7.ContainsKey(propCode)) map7[propCode] = fr;
-                        string h6 = propCode.Substring(0, 6);
-                        if (!map6.ContainsKey(h6)) map6[h6] = fr;
-                    }
-                    else if (propCode.Length == 6)
-                    {
-                        if (!map6.ContainsKey(propCode)) map6[propCode] = fr;
-                    }
-                }
+                var codeMap = new CodeMap(gf);
 
                 for (int i = 0; i < kv.Value.Count; i++)
                 {
                     Pending p = kv.Value[i];
-                    FeatureRef ft;
-                    if (!map7.TryGetValue(p.Key, out ft))
-                    {
-                        if (!map6.TryGetValue(Head6(p.Key), out ft)) ft = null;
-                    }
+                    FeatureRef ft = codeMap.Find(p.Key);
                     if (ft == null)
                     {
                         unresolved.Add(new string[] { p.Item.RegionCode, "FEATURE_NOT_FOUND" });
@@ -730,13 +746,6 @@ namespace JmaMap
 
         /*** 災害情報（地震・台風）***/
 
-        class PendingQuake
-        {
-            public string Key;        // このファイル内で一致させるコード
-            public string Code;       // フィード側の市区町村コード
-            public string Shindo;
-        }
-
         /// <summary>
         /// 地域コードを1つ以上の索引エントリへ解決する。
         /// 7桁一致 → 6桁 → 政令市の親コード → 気象警報用に細分された区域（市全体のコードで来る情報向け）。
@@ -875,136 +884,26 @@ namespace JmaMap
                 return;
             }
 
-            GeoIndex idx = GetIndex();
-            Dictionary<string, string> class20Parent = Jma.Class20Parent();
-
-            var byFile = new Dictionary<string, List<PendingQuake>>(StringComparer.OrdinalIgnoreCase);
-            var unresolved = new List<string[]>();
-            var strongest = new Dictionary<string, PendingQuake>(StringComparer.Ordinal);
-
+            // 市区町村ごとの震度を、他の災害情報と同じ「コード一覧を塗る」形に落とす。
+            // 同じポリゴンに複数の市区町村が寄ったときは、強い震度が残る（Rank比較）。
+            var items = new List<PaintItem>(q.Cities.Count);
             for (int i = 0; i < q.Cities.Count; i++)
             {
                 QuakeCityInt ci = q.Cities[i];
-
-                List<IndexEntry> picks = ResolveEntries(idx, class20Parent, ci.Code);
-                if (picks.Count == 0)
-                {
-                    unresolved.Add(new string[] { ci.Code, "INDEX_NOT_FOUND" });
-                    continue;
-                }
-
-                for (int e = 0; e < picks.Count; e++)
-                {
-                    IndexEntry pick = picks[e];
-                    string norm = GeoIndex.NormalizeCode(pick.Raw);
-                    string key = (norm.Length > 0) ? norm : pick.Raw;
-
-                    // 政令市の区が親ポリゴンへ寄ると同じ図形が重なる。強い震度だけを残す。
-                    string dedup = pick.File + "|" + key;
-                    PendingQuake exist;
-                    if (strongest.TryGetValue(dedup, out exist))
-                    {
-                        if (ShindoRank(ci.Shindo) > ShindoRank(exist.Shindo))
-                        {
-                            exist.Shindo = ci.Shindo;
-                            exist.Code = ci.Code;
-                        }
-                        continue;
-                    }
-
-                    var p = new PendingQuake();
-                    p.Key = key;
-                    p.Code = ci.Code;
-                    p.Shindo = ci.Shindo;
-                    strongest[dedup] = p;
-
-                    List<PendingQuake> list;
-                    if (!byFile.TryGetValue(pick.File, out list))
-                    {
-                        list = new List<PendingQuake>();
-                        byFile[pick.File] = list;
-                    }
-                    list.Add(p);
-                }
+                var p = new PaintItem();
+                p.Code = ci.Code;
+                p.Group = "quake";
+                p.Rank = ShindoRank(ci.Shindo);
+                p.PropsJson = ",\"shindo\":" + Json.Quote(ci.Shindo);
+                items.Add(p);
             }
 
+            var unresolved = new List<string[]>();
             w.Write("{\"type\":\"FeatureCollection\",\"features\":[");
-
-            bool first = true;
-            foreach (var kv in byFile)
-            {
-                GeoFile gf;
-                try
-                {
-                    gf = store.Get(kv.Key);
-                }
-                catch (Exception ex)
-                {
-                    Trace("GeoJSON読み込み失敗 " + Path.GetFileName(kv.Key) + ": " + ex.Message);
-                    for (int i = 0; i < kv.Value.Count; i++)
-                        unresolved.Add(new string[] { kv.Value[i].Code, "GEOJSON_LOAD_FAILED" });
-                    continue;
-                }
-
-                var map7 = new Dictionary<string, FeatureRef>(StringComparer.Ordinal);
-                var map6 = new Dictionary<string, FeatureRef>(StringComparer.Ordinal);
-                for (int f = 0; f < gf.Features.Count; f++)
-                {
-                    FeatureRef fr = gf.Features[f];
-                    if (!GeoJson.HasGeometry(fr)) continue;
-                    string propCode = GeoIndex.NormalizeCode(fr.Code);
-                    if (propCode.Length == 7)
-                    {
-                        if (!map7.ContainsKey(propCode)) map7[propCode] = fr;
-                        string h6 = propCode.Substring(0, 6);
-                        if (!map6.ContainsKey(h6)) map6[h6] = fr;
-                    }
-                    else if (propCode.Length == 6)
-                    {
-                        if (!map6.ContainsKey(propCode)) map6[propCode] = fr;
-                    }
-                }
-
-                for (int i = 0; i < kv.Value.Count; i++)
-                {
-                    PendingQuake p = kv.Value[i];
-                    FeatureRef ft;
-                    if (!map7.TryGetValue(p.Key, out ft))
-                    {
-                        if (!map6.TryGetValue(Head6(p.Key), out ft)) ft = null;
-                    }
-                    if (ft == null)
-                    {
-                        unresolved.Add(new string[] { p.Code, "FEATURE_NOT_FOUND" });
-                        continue;
-                    }
-                    if (OutsideView(kv.Key, gf, ft, view)) continue;
-
-                    if (!first) w.Write(',');
-                    first = false;
-                    w.Write("{\"type\":\"Feature\",\"properties\":{\"code\":");
-                    w.Write(Json.Quote(p.Code));
-                    w.Write(",\"name\":");
-                    w.Write(Json.Quote(ft.Name));
-                    w.Write(",\"shindo\":");
-                    w.Write(Json.Quote(p.Shindo));
-                    w.Write("},\"geometry\":");
-                    w.Write(GetGeometryJson(kv.Key, gf, ft, tolerance));
-                    w.Write('}');
-                }
-            }
-
-            w.Write("],\"unresolved\":[");
-            for (int i = 0; i < unresolved.Count; i++)
-            {
-                if (i > 0) w.Write(',');
-                w.Write("{\"code\":");
-                w.Write(Json.Quote(unresolved[i][0]));
-                w.Write(",\"reason\":");
-                w.Write(Json.Quote(unresolved[i][1]));
-                w.Write('}');
-            }
-            w.Write("],\"quake\":{\"eid\":");
+            WritePaintedFeatures(w, items, tolerance, unresolved, view);
+            w.Write("],\"unresolved\":");
+            WriteUnresolved(w, unresolved);
+            w.Write(",\"quake\":{\"eid\":");
             w.Write(Json.Quote(q.Eid));
             w.Write(",\"title\":");
             w.Write(Json.Quote(q.Title));
@@ -1102,7 +1001,8 @@ namespace JmaMap
         class PaintItem
         {
             public string Code;        // フィード側のコード（表示用）
-            public int Rank;           // 同じポリゴンが重なったとき、大きいほうを残す
+            public string Group;       // 重なりを判定する単位。同じGroup同士だけを突き合わせる
+            public int Rank;           // 同じポリゴン・同じGroupで重なったとき、大きいほうを残す
             public string PropsJson;   // 例: ",\"kind\":\"volcano\",\"volcano\":\"桜島\""
         }
 
@@ -1149,12 +1049,18 @@ namespace JmaMap
                     IndexEntry pick = picks[e];
                     string norm = GeoIndex.NormalizeCode(pick.Raw);
                     string key = (norm.Length > 0) ? norm : pick.Raw;
-                    string dedup = pick.File + "|" + key + "|" + it.PropsJson;
+                    string dedup = pick.File + "|" + key + "|" + it.Group;
 
                     PaintResolved exist;
                     if (best.TryGetValue(dedup, out exist))
                     {
-                        if (it.Rank > exist.Rank) { exist.Rank = it.Rank; exist.Code = it.Code; }
+                        // 同じ図形に重なったら強いほうを残す（政令市の区が親ポリゴンへ寄る場合など）
+                        if (it.Rank > exist.Rank)
+                        {
+                            exist.Rank = it.Rank;
+                            exist.Code = it.Code;
+                            exist.PropsJson = it.PropsJson;
+                        }
                         continue;
                     }
 
@@ -1191,33 +1097,12 @@ namespace JmaMap
                     continue;
                 }
 
-                var map7 = new Dictionary<string, FeatureRef>(StringComparer.Ordinal);
-                var map6 = new Dictionary<string, FeatureRef>(StringComparer.Ordinal);
-                for (int f = 0; f < gf.Features.Count; f++)
-                {
-                    FeatureRef fr = gf.Features[f];
-                    if (!GeoJson.HasGeometry(fr)) continue;
-                    string propCode = GeoIndex.NormalizeCode(fr.Code);
-                    if (propCode.Length == 7)
-                    {
-                        if (!map7.ContainsKey(propCode)) map7[propCode] = fr;
-                        string h6 = propCode.Substring(0, 6);
-                        if (!map6.ContainsKey(h6)) map6[h6] = fr;
-                    }
-                    else if (propCode.Length == 6)
-                    {
-                        if (!map6.ContainsKey(propCode)) map6[propCode] = fr;
-                    }
-                }
+                var codeMap = new CodeMap(gf);
 
                 for (int i = 0; i < kv.Value.Count; i++)
                 {
                     PaintResolved p = kv.Value[i];
-                    FeatureRef ft;
-                    if (!map7.TryGetValue(p.Key, out ft))
-                    {
-                        if (!map6.TryGetValue(Head6(p.Key), out ft)) ft = null;
-                    }
+                    FeatureRef ft = codeMap.Find(p.Key);
                     if (ft == null)
                     {
                         unresolved.Add(new string[] { p.Code, "FEATURE_NOT_FOUND" });
@@ -1274,6 +1159,8 @@ namespace JmaMap
                 {
                     var p = new PaintItem();
                     p.Code = v.Municipalities[m];
+                    // 火山ごとに別のフィーチャとして残す（同じ市町村に複数の火山が効くことがある）
+                    p.Group = props;
                     p.Rank = Hazards.VolcanoRank(v.KindCode);
                     p.PropsJson = props;
                     items.Add(p);
@@ -1287,6 +1174,7 @@ namespace JmaMap
                 {
                     var p = new PaintItem();
                     p.Code = a.Ash[m];
+                    p.Group = ashProps;
                     p.Rank = 1;
                     p.PropsJson = ashProps;
                     items.Add(p);
@@ -1296,6 +1184,7 @@ namespace JmaMap
                 {
                     var p = new PaintItem();
                     p.Code = a.Stone[m];
+                    p.Group = stoneProps;
                     p.Rank = 2;
                     p.PropsJson = stoneProps;
                     items.Add(p);
@@ -1381,6 +1270,7 @@ namespace JmaMap
                 {
                     var it = new PaintItem();
                     it.Code = f.PrefCodes[p];
+                    it.Group = props;
                     it.Rank = f.Level;
                     it.PropsJson = props;
                     items.Add(it);

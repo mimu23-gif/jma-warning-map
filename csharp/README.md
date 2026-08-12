@@ -191,17 +191,17 @@ csharp\
   build.bat                 csc.exe を叩くだけのビルドスクリプト
   settings.json             設定（GAS版の Script Properties に相当）
   src\
-    Program.cs      370行   起動・二重起動抑止・トレイ・ブラウザ起動・自己診断
-    Server.cs       848行   HttpListener・ルーティング・FeatureCollection生成
-    Settings.cs      91行   settings.json の読み込みとパス解決
-    GeoIndex.cs     274行   コード→ファイル索引の構築／キャッシュ／GeoJSONのLRU
-    GeoJson.cs      137行   GeoJSONを走査してフィーチャ位置を拾うスキャナ
-    Json.cs         240行   軽量JSONパーサ／ライタ
-    JmaClient.cs    264行   気象庁フィードの取得と警報の集約
-    DisasterClient.cs 379行 地震（震源・震度）と台風の取得
-    VolcanoFlood.cs         噴火警報・降灰予報・指定河川洪水予報・津波の取得
-    XmlFeed.cs              防災情報XML（Atom）の読み取りと座標表記の解釈
-    PointsCsv.cs    224行   POI CSV の読み込み
+    Program.cs       482行   起動・二重起動抑止・トレイ・ブラウザ起動・自己診断
+    Server.cs       1478行   HttpListener・ルーティング・FeatureCollection生成
+    Settings.cs      160行   settings.json の読み込みとパス解決
+    GeoIndex.cs      342行   コード→ファイル索引の構築／キャッシュ／GeoJSONのLRU
+    GeoJson.cs       154行   GeoJSONを走査してフィーチャ位置を拾うスキャナ
+    Json.cs          260行   軽量JSONパーサ／ライタ
+    JmaClient.cs     295行   気象庁フィードの取得と警報の集約
+    DisasterClient.cs 429行  地震（震源・震度）と台風の取得
+    VolcanoFlood.cs  571行   噴火警報・降灰予報・指定河川洪水予報・津波の取得
+    XmlFeed.cs       215行   防災情報XML（Atom）の読み取りと座標表記の解釈
+    PointsCsv.cs     249行   POI CSV の読み込み
   web\
     map.html                画面（GAS版 MAP.html を fetch() 版に改修）
     leaflet.js / .css       Leaflet 1.9.4（BSD-2-Clause）を同梱
@@ -327,6 +327,22 @@ GeoTool.exe convert --in ..\_work\gis_src\20230517_AreaForecastLocalM_matome_GIS
 
 ロジック（コードの6桁/7桁正規化、`class10s` の子コード展開、政令市の親コードへのフォールバック、
 レベル判定、現象名の対応表）はGAS版と同じ規則を移してあります。
+
+ただし**対応している情報はGAS版と同じではありません**。GAS版は気象警報・注意報とPOIだけで、
+災害情報レイヤー（地震・台風・噴火・降灰・河川氾濫・津波）・ズーム連動LOD・自動更新・
+ビューポート絞り込みはC#版のみです。災害情報の多くは防災情報XMLの個別電文を数十件取りに行くため、
+GASの6分の実行時間制限と `CacheService` の95KB上限に収まりません。
+
+### コード→ポリゴンの解決は1か所にまとめてある
+
+警報・震度・噴火・降灰・河川洪水は、いずれも「地域コードの一覧をポリゴンに塗る」処理です。
+`WritePaintedFeatures` と `CodeMap` に集約してあり、新しい情報を足すときは
+`PaintItem`（コード・グループ・優先度・properties断片）の一覧を作って渡すだけで済みます。
+
+- `CodeMap` … ファイル内の「コード → フィーチャ」索引（7桁一致 → 6桁）
+- `ResolveEntries` … コード → 索引エントリ（7桁 → 6桁 → 政令市の親 → 細分区域）
+- `Group` … 重なりの判定単位。同じポリゴンに同じGroupが重なったら `Rank` の大きいほうを残す
+  （震度なら強いほう、火山なら火山ごとに別フィーチャ）
 
 ### 細分された市区町村へのフォールバック（C#版のみ）
 
