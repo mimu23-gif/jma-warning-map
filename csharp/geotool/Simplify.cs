@@ -15,6 +15,24 @@ namespace JmaMap.Tools
         /// <summary>GeoJSONのgeometryテキストを簡略化して返す。頂点数の増減を outBefore/outAfter で返す。</summary>
         public static string Geometry(string geometryJson, double tolerance, ref long before, ref long after)
         {
+            // 線のデータ（津波予報区など）はリングではないので、閉じ直さずに間引く
+            List<double[]> paths = ParseLines(geometryJson);
+            if (paths != null)
+            {
+                var keptPaths = new List<double[]>(paths.Count);
+                for (int i = 0; i < paths.Count; i++)
+                {
+                    before += paths[i].Length / 2;
+                    double[] simplified = Line(paths[i], tolerance);
+                    if (simplified == null) continue;
+                    after += simplified.Length / 2;
+                    keptPaths.Add(simplified);
+                }
+                var lsb = new StringBuilder(1024);
+                CoordWriter.AppendLineGeometry(lsb, keptPaths);
+                return lsb.ToString();
+            }
+
             List<List<double[]>> polygons = ParsePolygons(geometryJson);
             if (polygons == null) return geometryJson;   // null geometry などはそのまま
 
@@ -38,6 +56,35 @@ namespace JmaMap.Tools
             var sb = new StringBuilder(1024);
             CoordWriter.AppendGeometry(sb, outPolys);
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// 開いた折れ線を簡略化する。リングと違って閉じ直さず、2点あれば線として成立するので
+        /// 潰して消すこともしない（海岸線が虫食いになるのを避ける）。
+        /// </summary>
+        public static double[] Line(double[] path, double tolerance)
+        {
+            int n = path.Length / 2;
+            if (n <= 2) return path;
+
+            var keep = new bool[n];
+            keep[0] = true;
+            keep[n - 1] = true;
+            DouglasPeucker(path, 0, n - 1, tolerance, keep);
+
+            int kept = 0;
+            for (int i = 0; i < n; i++) if (keep[i]) kept++;
+
+            var outPath = new double[kept * 2];
+            int w = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (!keep[i]) continue;
+                outPath[w * 2] = path[i * 2];
+                outPath[w * 2 + 1] = path[i * 2 + 1];
+                w++;
+            }
+            return outPath;
         }
 
         /// <summary>
@@ -191,7 +238,57 @@ namespace JmaMap.Tools
                 }
                 return polys;
             }
-            return null;   // Point/LineString 等は対象外
+            return null;   // Point/LineString 等はここでは扱わない（ParseLines が受け持つ）
+        }
+
+        /// <summary>
+        /// LineString / MultiLineString の coordinates をパスの配列へ読み込む。
+        /// 線でなければ null を返し、呼び出し側はポリゴンとして処理する。
+        /// </summary>
+        public static List<double[]> ParseLines(string s)
+        {
+            int i = 0;
+            Json.SkipWs(s, ref i);
+            if (i >= s.Length || s[i] != '{') return null;
+
+            string type = null;
+            int coordStart = -1;
+            i++;
+            while (true)
+            {
+                Json.SkipWs(s, ref i);
+                if (i >= s.Length) break;
+                if (s[i] == '}') { i++; break; }
+                if (s[i] == ',') { i++; continue; }
+                if (s[i] != '"') break;
+
+                string key = Json.ParseString(s, ref i);
+                Json.SkipWs(s, ref i);
+                if (i < s.Length && s[i] == ':') i++;
+                Json.SkipWs(s, ref i);
+
+                if (key == "type") type = Json.ParseString(s, ref i);
+                else if (key == "coordinates") { coordStart = i; Json.SkipValue(s, ref i); }
+                else Json.SkipValue(s, ref i);
+            }
+
+            if (coordStart < 0 || type == null) return null;
+
+            int p = coordStart;
+            if (type == "LineString")
+            {
+                // 座標の並びはリング1本と同じ形
+                var one = ReadRing(s, ref p);
+                var list = new List<double[]>(1);
+                if (one != null) list.Add(one);
+                return list;
+            }
+            if (type == "MultiLineString")
+            {
+                // Polygon の rings と同じ形
+                return ReadRings(s, ref p);
+            }
+            return null;
         }
 
         static List<double[]> ReadRings(string s, ref int p)

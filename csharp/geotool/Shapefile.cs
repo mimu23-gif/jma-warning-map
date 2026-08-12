@@ -18,15 +18,19 @@ namespace JmaMap.Tools
     {
         public int Number;
         public int ShapeType;
-        public List<double[]> Rings;   // 各リングは [x0,y0,x1,y1,...]
+        public List<double[]> Rings;   // 各リング（線なら各パート）は [x0,y0,x1,y1,...]
         public bool IsNull;
+        public bool IsLine;            // PolyLine 系なら true（津波予報区など海岸線のデータ）
     }
 
     public class ShpReader : IDisposable
     {
         public const int TypeNull = 0;
+        public const int TypePolyLine = 3;
         public const int TypePolygon = 5;
+        public const int TypePolyLineZ = 13;
         public const int TypePolygonZ = 15;
+        public const int TypePolyLineM = 23;
         public const int TypePolygonM = 25;
 
         readonly FileStream fs;
@@ -70,8 +74,13 @@ namespace JmaMap.Tools
                 rec.IsNull = true;
                 return rec;
             }
-            if (shapeType != TypePolygon && shapeType != TypePolygonZ && shapeType != TypePolygonM)
-                throw new NotSupportedException("ポリゴン以外の図形型には対応していません（shapeType=" + shapeType.ToString(CultureInfo.InvariantCulture) + "）");
+            // PolyLine と Polygon はレコードの並び（bbox・numParts・numPoints・parts・points）が同じで、
+            // 各パートをリングとして閉じるか折れ線のまま扱うかだけが違う。
+            bool isPolygon = (shapeType == TypePolygon || shapeType == TypePolygonZ || shapeType == TypePolygonM);
+            bool isLine = (shapeType == TypePolyLine || shapeType == TypePolyLineZ || shapeType == TypePolyLineM);
+            if (!isPolygon && !isLine)
+                throw new NotSupportedException("ポリゴン・折れ線以外の図形型には対応していません（shapeType=" + shapeType.ToString(CultureInfo.InvariantCulture) + "）");
+            rec.IsLine = isLine;
 
             // 4 doubles の bbox を読み飛ばした位置から
             int p = 4 + 32;

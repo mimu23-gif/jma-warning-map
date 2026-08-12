@@ -34,6 +34,27 @@ namespace JmaMap.Tools
             sb.Append(" ] }");
         }
 
+        /// <summary>折れ線群を GeoJSON の geometry オブジェクトとして書く（津波予報区など線のデータ用）。</summary>
+        public static void AppendLineGeometry(StringBuilder sb, List<double[]> paths)
+        {
+            if (paths == null || paths.Count == 0) { sb.Append("null"); return; }
+
+            if (paths.Count == 1)
+            {
+                sb.Append("{ \"type\": \"LineString\", \"coordinates\": ");
+                AppendRing(sb, paths[0]);
+                sb.Append(" }");
+                return;
+            }
+            sb.Append("{ \"type\": \"MultiLineString\", \"coordinates\": [ ");
+            for (int i = 0; i < paths.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                AppendRing(sb, paths[i]);
+            }
+            sb.Append(" ] }");
+        }
+
         public static void AppendPolygon(StringBuilder sb, List<double[]> rings)
         {
             sb.Append("[ ");

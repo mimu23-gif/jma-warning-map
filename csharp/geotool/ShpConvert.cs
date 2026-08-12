@@ -198,6 +198,12 @@ namespace JmaMap.Tools
         static void AppendGeometry(StringBuilder sb, ShpRecord rec)
         {
             if (rec.IsNull || rec.Rings == null || rec.Rings.Count == 0) { sb.Append("null"); return; }
+            if (rec.IsLine)
+            {
+                // 線には外周も穴もないので、各パートをそのまま LineString として書く
+                CoordWriter.AppendLineGeometry(sb, rec.Rings);
+                return;
+            }
             CoordWriter.AppendGeometry(sb, GroupRings(rec.Rings));
         }
 
